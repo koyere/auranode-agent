@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -58,6 +59,7 @@ type stream struct {
 	failed         chan struct{} // source: se cierra al recibir ack con error
 	closeOnce      sync.Once
 	inboxCloseOnce sync.Once
+	inboxClosed    atomic.Bool // evita send-on-closed-channel en Data tras closeInbox
 
 	stateMu   sync.Mutex // protege readDone/writeDone
 	readDone  bool       // local→peer terminó (lector vio EOF)
@@ -134,6 +136,7 @@ func (s *stream) abort() {
 // envío concurrente al inbox mientras se cierra.
 func (s *stream) closeInbox() {
 	s.inboxCloseOnce.Do(func() {
+		s.inboxClosed.Store(true)
 		close(s.inbox)
 	})
 }
@@ -362,8 +365,8 @@ func (m *Manager) Data(streamID string, b []byte) {
 	m.mu.Lock()
 	s := m.streams[streamID]
 	m.mu.Unlock()
-	if s == nil {
-		return
+	if s == nil || s.inboxClosed.Load() {
+		return // stream cerrado en esta dirección: no enviar (evita panic)
 	}
 	select {
 	case <-s.done:
@@ -391,12 +394,14 @@ func (m *Manager) AddCredit(streamID string, bytes int) {
 	s.addCredit(bytes)
 }
 
-// CloseStream cierra un stream por orden del extremo opuesto (EOF ordenado): drena lo
-// pendiente antes de cerrar la conexión local para no truncar el último tramo.
+// CloseStream cierra la dirección peer→local de un stream (EOF ordenado del peer):
+// drena lo pendiente y hace half-close. NO elimina el stream del mapa: la dirección
+// local→peer (lector) puede seguir activa y necesita recibir créditos (tunnel_window)
+// para esa dirección. El stream se elimina vía markDone cuando AMBAS direcciones
+// terminan.
 func (m *Manager) CloseStream(streamID string) {
 	m.mu.Lock()
 	s := m.streams[streamID]
-	delete(m.streams, streamID)
 	m.mu.Unlock()
 	if s != nil {
 		s.closeInbox()

@@ -4,6 +4,15 @@ Todas las versiones notables del agente de AuraNode se documentan aquí.
 El formato sigue [Keep a Changelog](https://keepachangelog.com/) y
 [SemVer](https://semver.org/lang/es/).
 
+## [1.2.1] — 2026-06-20
+
+### Corregido
+- **Deadlock de half-close en túneles:** al cerrarse una dirección del stream (p.ej.
+  fin de la petición mientras la respuesta sigue fluyendo), el stream se eliminaba del
+  mapa y los créditos (`tunnel_window`) de la dirección aún activa se perdían → el
+  lector se quedaba sin crédito y la conexión se colgaba. Ahora el cierre sólo afecta a
+  su dirección (half-close real) y el stream se elimina cuando ambas terminan.
+
 ## [1.2.0] — 2026-06-20
 
 ### Añadido / Mejorado
