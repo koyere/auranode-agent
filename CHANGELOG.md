@@ -4,6 +4,16 @@ Todas las versiones notables del agente de AuraNode se documentan aquí.
 El formato sigue [Keep a Changelog](https://keepachangelog.com/) y
 [SemVer](https://semver.org/lang/es/).
 
+## [1.1.0] — 2026-06-20
+
+### Añadido
+- **Comprobación de actualizaciones (check-and-notify):** el agente consulta cada
+  6 h GitHub Releases y, si hay una versión más reciente, lo registra en log y avisa
+  al backend (el panel muestra "actualización disponible"). El agente **no** se
+  auto-reemplaza, para preservar el hardening del servicio.
+- **Imágenes Docker multi-arch** en GHCR (`ghcr.io/koyere/auranode-agent`),
+  `linux/amd64` y `linux/arm64`, publicadas automáticamente en cada release.
+
 ## [1.0.0] — 2026-06-20
 
 Primer release público del agente.

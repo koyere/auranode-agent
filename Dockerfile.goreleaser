@@ -1,0 +1,7 @@
+# Dockerfile usado por GoReleaser: copia el binario ya compilado (no compila).
+# Para build manual desde fuente, usa el Dockerfile multi-stage.
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY auranode-agent /usr/local/bin/auranode-agent
+ENV AURANODE_DB_PATH=/var/lib/auranode/buffer.db
+VOLUME ["/var/lib/auranode"]
+ENTRYPOINT ["/usr/local/bin/auranode-agent"]

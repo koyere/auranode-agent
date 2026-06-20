@@ -39,6 +39,50 @@ checksum:
   name_template: "checksums.txt"
   algorithm: sha256
 
+# ─── Imágenes Docker multi-arch en GHCR ───────────────────────────────────────
+dockers:
+  - id: amd64
+    goos: linux
+    goarch: amd64
+    dockerfile: Dockerfile.goreleaser
+    use: buildx
+    image_templates:
+      - "ghcr.io/koyere/auranode-agent:{{ .Version }}-amd64"
+      - "ghcr.io/koyere/auranode-agent:latest-amd64"
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.source=https://github.com/koyere/auranode-agent"
+      - "--label=org.opencontainers.image.licenses=MIT"
+  - id: arm64
+    goos: linux
+    goarch: arm64
+    dockerfile: Dockerfile.goreleaser
+    use: buildx
+    image_templates:
+      - "ghcr.io/koyere/auranode-agent:{{ .Version }}-arm64"
+      - "ghcr.io/koyere/auranode-agent:latest-arm64"
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.source=https://github.com/koyere/auranode-agent"
+      - "--label=org.opencontainers.image.licenses=MIT"
+
+docker_manifests:
+  - name_template: "ghcr.io/koyere/auranode-agent:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/koyere/auranode-agent:{{ .Version }}-amd64"
+      - "ghcr.io/koyere/auranode-agent:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/koyere/auranode-agent:latest"
+    skip_push: auto   # no mover :latest en pre-releases
+    image_templates:
+      - "ghcr.io/koyere/auranode-agent:latest-amd64"
+      - "ghcr.io/koyere/auranode-agent:latest-arm64"
+
 release:
   draft: false
   prerelease: auto   # Los tags v1.0.0-beta.1 quedan como pre-release automáticamente
@@ -50,3 +94,4 @@ changelog:
       - "^docs:"
       - "^test:"
       - "^chore:"
+      - "^sync:"

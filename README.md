@@ -41,6 +41,18 @@ sudo install -m755 auranode-agent /usr/local/bin/
 Luego define `AURANODE_TOKEN` en `/etc/auranode/agent.env` y crea el servicio systemd
 (ver [`install.sh`](install.sh) como referencia).
 
+### Docker
+
+```bash
+docker run -d --name auranode-agent --restart unless-stopped \
+  --pid host --network host \
+  -e AURANODE_TOKEN=ant_xxx \
+  -v auranode-data:/var/lib/auranode \
+  ghcr.io/koyere/auranode-agent:latest
+```
+
+Imágenes multi-arch (`linux/amd64`, `linux/arm64`) publicadas en cada release.
+
 ## Configuración
 
 El agente se configura por variables de entorno (en `/etc/auranode/agent.env`):

@@ -6,18 +6,19 @@ package proto
 
 const (
 	// Agente → Backend
-	TypeAgentInfo    = "agent_info"
-	TypeHeartbeat    = "heartbeat"
-	TypeMetrics      = "metrics"
-	TypeMetricsBatch = "metrics_batch"
-	TypeLogStream    = "log_stream"
-	TypeExecAck      = "exec_ack"
-	TypeExecRunning  = "exec_running"
-	TypeExecResult   = "exec_result"
-	TypeRuleFired    = "rule_fired"
-	TypeAlert        = "alert"
-	TypeFSResponse   = "fs_response"
-	TypeError        = "error"
+	TypeAgentInfo       = "agent_info"
+	TypeHeartbeat       = "heartbeat"
+	TypeMetrics         = "metrics"
+	TypeMetricsBatch    = "metrics_batch"
+	TypeLogStream       = "log_stream"
+	TypeExecAck         = "exec_ack"
+	TypeExecRunning     = "exec_running"
+	TypeExecResult      = "exec_result"
+	TypeRuleFired       = "rule_fired"
+	TypeAlert           = "alert"
+	TypeFSResponse      = "fs_response"
+	TypeUpdateAvailable = "update_available"
+	TypeError           = "error"
 
 	// Backend → Agente
 	TypeConfig    = "config"
@@ -74,6 +75,15 @@ type Heartbeat struct {
 	Envelope
 }
 
+// UpdateAvailable lo envía el agente cuando detecta una versión más reciente en
+// GitHub Releases. El agente NO se auto-reemplaza (modelo check-and-notify): el
+// backend lo registra para que el panel muestre que hay actualización disponible.
+type UpdateAvailable struct {
+	Envelope
+	CurrentVersion string `json:"current_version"`
+	LatestVersion  string `json:"latest_version"`
+}
+
 type CPUMetrics struct {
 	UsagePercent float64 `json:"usage_percent"`
 	Cores        int     `json:"cores"`
@@ -115,12 +125,12 @@ type ProcessInfo struct {
 
 type Metrics struct {
 	Envelope
-	CPU          CPUMetrics    `json:"cpu"`
-	RAM          RAMMetrics    `json:"ram"`
-	Disk         []DiskMetric  `json:"disk"`
+	CPU          CPUMetrics      `json:"cpu"`
+	RAM          RAMMetrics      `json:"ram"`
+	Disk         []DiskMetric    `json:"disk"`
 	Network      []NetworkMetric `json:"network"`
-	LoadAvg      LoadAvg       `json:"load_avg"`
-	TopProcesses []ProcessInfo `json:"top_processes"`
+	LoadAvg      LoadAvg         `json:"load_avg"`
+	TopProcesses []ProcessInfo   `json:"top_processes"`
 }
 
 type MetricsBatch struct {
@@ -320,6 +330,7 @@ type RuleSync struct {
 	Envelope
 	Rules []RuleDefinition `json:"rules"`
 }
+
 // ─── Migraciones entre VPS (Tipo B: directorio, modo relay) ──────────────────
 //
 // Plano de control (agente ↔ backend) y plano de datos (source ↔ dest, que el

@@ -11,32 +11,34 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/koyere/auranode-agent/internal/buffer"
-	agentcfg "github.com/koyere/auranode-agent/internal/config"
 	"github.com/koyere/auranode-agent/internal/collector"
+	agentcfg "github.com/koyere/auranode-agent/internal/config"
 	"github.com/koyere/auranode-agent/internal/connection"
 	"github.com/koyere/auranode-agent/internal/executor"
 	agentfs "github.com/koyere/auranode-agent/internal/fs"
 	"github.com/koyere/auranode-agent/internal/migration"
 	"github.com/koyere/auranode-agent/internal/rules"
 	"github.com/koyere/auranode-agent/internal/tunnel"
+	"github.com/koyere/auranode-agent/internal/updater"
 	"github.com/koyere/auranode-agent/pkg/proto"
 )
 
 // Agent es la raíz del proceso.
 type Agent struct {
-	cfg       *agentcfg.Config
-	log       *zap.Logger
-	collector *collector.Collector
-	buf       *buffer.Buffer
+	cfg        *agentcfg.Config
+	log        *zap.Logger
+	collector  *collector.Collector
+	buf        *buffer.Buffer
 	engine     *rules.Engine
 	tunnels    *tunnel.Manager
 	migrations *migration.Manager
+	updater    *updater.Updater
 	ws         *connection.Client
 
-	mu               sync.Mutex
-	metricsInterval  time.Duration
+	mu                sync.Mutex
+	metricsInterval   time.Duration
 	heartbeatInterval time.Duration
-	sendFn           func(any) error // se asigna al conectar
+	sendFn            func(any) error // se asigna al conectar
 }
 
 func New(cfg *agentcfg.Config, log *zap.Logger) (*Agent, error) {
@@ -79,12 +81,34 @@ func New(cfg *agentcfg.Config, log *zap.Logger) (*Agent, error) {
 	a.tunnels = tunnel.New(log)
 	a.migrations = migration.New(log, dirOf(cfg.DBPath))
 
+	// Updater check-and-notify: avisa al backend cuando hay versión más reciente.
+	a.updater = updater.New(cfg.Version, log, func(current, latest string) {
+		a.sendUpdateAvailable(current, latest)
+	})
+
 	a.ws = connection.New(cfg.BackendURL, cfg.AgentToken, a, log)
 	return a, nil
 }
 
 func (a *Agent) Run(ctx context.Context) {
+	a.updater.Start(ctx)
 	a.ws.Run(ctx)
+}
+
+// sendUpdateAvailable notifica al backend que hay una versión más reciente (si
+// hay conexión activa; si no, se reenvía en el próximo OnConnect).
+func (a *Agent) sendUpdateAvailable(current, latest string) {
+	a.mu.Lock()
+	fn := a.sendFn
+	a.mu.Unlock()
+	if fn == nil {
+		return
+	}
+	fn(proto.UpdateAvailable{ //nolint:errcheck
+		Envelope:       proto.Envelope{Type: proto.TypeUpdateAvailable, Timestamp: time.Now().Unix()},
+		CurrentVersion: current,
+		LatestVersion:  latest,
+	})
 }
 
 // ─── connection.MessageHandler ────────────────────────────────────────────────
@@ -101,6 +125,15 @@ func (a *Agent) OnConnect(ctx context.Context, sendFn func(any) error) {
 	if err := sendFn(info); err != nil {
 		a.log.Warn("handshake: error enviando agent_info", zap.Error(err))
 		return
+	}
+
+	// 1b. Si ya se detectó una versión más reciente, reavisar al backend.
+	if latest := a.updater.LatestKnown(); latest != "" {
+		sendFn(proto.UpdateAvailable{ //nolint:errcheck
+			Envelope:       proto.Envelope{Type: proto.TypeUpdateAvailable, Timestamp: time.Now().Unix()},
+			CurrentVersion: a.cfg.Version,
+			LatestVersion:  latest,
+		})
 	}
 
 	// 2. Vaciar buffer offline si hay entradas
