@@ -4,6 +4,17 @@ Todas las versiones notables del agente de AuraNode se documentan aquí.
 El formato sigue [Keep a Changelog](https://keepachangelog.com/) y
 [SemVer](https://semver.org/lang/es/).
 
+## [1.2.0] — 2026-06-20
+
+### Añadido / Mejorado
+- **Control de flujo por créditos en los túneles** (port forwarding): cada dirección
+  de cada stream tiene una ventana de bytes en vuelo; el receptor concede crédito
+  (`tunnel_window`) al drenar y el emisor deja de leer su TCP local cuando se agota,
+  aplicando backpressure real al origen. Antes, un consumidor sostenidamente lento
+  saturaba el buffer y reseteaba el stream; ahora se frena sin perder bytes.
+- Negociación de capacidad: el control de flujo sólo se activa si ambos extremos lo
+  soportan (compatibilidad con versiones antiguas; fallback al modo previo).
+
 ## [1.1.0] — 2026-06-20
 
 ### Añadido

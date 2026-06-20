@@ -17,10 +17,10 @@ import (
 )
 
 const (
-	maxBackoff     = 5 * time.Minute
-	baseBackoff    = 2 * time.Second
-	writeTimeout   = 10 * time.Second
-	pongTimeout    = 60 * time.Second
+	maxBackoff   = 5 * time.Minute
+	baseBackoff  = 2 * time.Second
+	writeTimeout = 10 * time.Second
+	pongTimeout  = 60 * time.Second
 )
 
 // MessageHandler procesa mensajes recibidos desde el backend.
@@ -37,6 +37,7 @@ type MessageHandler interface {
 	OnTunnelOpenAck(msg proto.TunnelOpenAck)
 	OnTunnelData(msg proto.TunnelData)
 	OnTunnelClose(msg proto.TunnelClose)
+	OnTunnelWindow(msg proto.TunnelWindow)
 	// OnMigration recibe todos los mensajes migration_* (sub-protocolo de migración);
 	// el Manager hace su propio despacho interno por tipo.
 	OnMigration(msgType string, raw []byte)
@@ -279,6 +280,12 @@ func (c *Client) dispatch(data []byte) {
 		var msg proto.TunnelClose
 		if json.Unmarshal(data, &msg) == nil {
 			c.handler.OnTunnelClose(msg)
+		}
+
+	case proto.TypeTunnelWindow:
+		var msg proto.TunnelWindow
+		if json.Unmarshal(data, &msg) == nil {
+			c.handler.OnTunnelWindow(msg)
 		}
 
 	case proto.TypeAgentPing:

@@ -269,7 +269,7 @@ func (a *Agent) OnTunnelOpen(msg proto.TunnelOpen) {
 	// Rol dest: el backend pide abrir la conexión hacia el servicio destino.
 	a.log.Debug("tunnel: open recibido (dest)", zap.String("stream_id", msg.StreamID),
 		zap.String("host", msg.Host), zap.Int("port", msg.Port))
-	a.tunnels.OpenDest(msg.TunnelID, msg.StreamID, msg.Host, msg.Port)
+	a.tunnels.OpenDest(msg.TunnelID, msg.StreamID, msg.Host, msg.Port, msg.FC)
 }
 
 func (a *Agent) OnTunnelOpenAck(msg proto.TunnelOpenAck) {
@@ -278,7 +278,7 @@ func (a *Agent) OnTunnelOpenAck(msg proto.TunnelOpenAck) {
 		a.log.Warn("tunnel: dial destino rechazado",
 			zap.String("stream_id", msg.StreamID), zap.String("error", msg.Error))
 	}
-	a.tunnels.Ack(msg.StreamID, msg.OK)
+	a.tunnels.Ack(msg.StreamID, msg.OK, msg.FC)
 }
 
 func (a *Agent) OnTunnelData(msg proto.TunnelData) {
@@ -291,6 +291,10 @@ func (a *Agent) OnTunnelData(msg proto.TunnelData) {
 
 func (a *Agent) OnTunnelClose(msg proto.TunnelClose) {
 	a.tunnels.CloseStream(msg.StreamID)
+}
+
+func (a *Agent) OnTunnelWindow(msg proto.TunnelWindow) {
+	a.tunnels.AddCredit(msg.StreamID, msg.Bytes)
 }
 
 func (a *Agent) OnMigration(msgType string, raw []byte) {

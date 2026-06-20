@@ -28,10 +28,13 @@ const (
 	dialTimeout  = 10 * time.Second
 	ackTimeout   = 15 * time.Second
 	relayBufSize = 32 * 1024 // chunk de lectura TCP
-	// inboxBuffer: chunks en vuelo por stream. Amplio para absorber ráfagas sin
-	// resetear conexiones legítimas cuyo consumidor va al día (32KB*2048 ≈ 64MB de
-	// holgura por stream). Si aun así se llena, se resetea el stream (NO se descartan
-	// bytes). El control de flujo por ventanas queda como follow-up.
+	// windowSize: créditos iniciales (bytes en vuelo) por stream y dirección. El emisor
+	// no lee de su TCP local más allá de este margen sin crédito; el receptor concede
+	// crédito (tunnel_window) a medida que drena. Aplica backpressure real al origen.
+	windowSize = 256 * 1024
+	// inboxBuffer: chunks en vuelo por stream. Con el control de flujo los bytes en
+	// vuelo quedan acotados a windowSize, así que este buffer no se llena en operación
+	// normal; el reset por overflow queda como red de seguridad (NO se descartan bytes).
 	inboxBuffer = 2048
 )
 
@@ -59,6 +62,54 @@ type stream struct {
 	stateMu   sync.Mutex // protege readDone/writeDone
 	readDone  bool       // local→peer terminó (lector vio EOF)
 	writeDone bool       // peer→local terminó (inbox cerrado y drenado)
+
+	// Control de flujo (créditos para el lector local→peer). fc se fija ANTES de
+	// arrancar el relay (en Ack/OpenDest) y sólo se lee después: sin carrera.
+	fc         bool // ambos extremos soportan créditos → gating activo
+	creditMu   sync.Mutex
+	creditCond *sync.Cond
+	sendCredit int
+}
+
+// initFlow inicializa el control de flujo del stream con la ventana completa.
+func (s *stream) initFlow() {
+	s.creditCond = sync.NewCond(&s.creditMu)
+	s.sendCredit = windowSize
+}
+
+// takeCredit bloquea hasta que haya crédito (o el stream termine) y reserva hasta
+// `max` bytes. Devuelve 0 si el stream está cerrado.
+func (s *stream) takeCredit(max int) int {
+	s.creditMu.Lock()
+	defer s.creditMu.Unlock()
+	for s.sendCredit <= 0 {
+		select {
+		case <-s.done:
+			return 0
+		default:
+		}
+		s.creditCond.Wait()
+	}
+	select {
+	case <-s.done:
+		return 0
+	default:
+	}
+	n := s.sendCredit
+	if n > max {
+		n = max
+	}
+	s.sendCredit -= n
+	return n
+}
+
+// addCredit suma crédito concedido por el receptor del extremo opuesto y despierta
+// al lector si estaba esperando.
+func (s *stream) addCredit(n int) {
+	s.creditMu.Lock()
+	s.sendCredit += n
+	s.creditMu.Unlock()
+	s.creditCond.Broadcast()
 }
 
 // abort cierra el stream de forma dura (error de conexión, reset, shutdown): aborta
@@ -68,6 +119,10 @@ func (s *stream) abort() {
 		close(s.done)
 		if s.conn != nil {
 			s.conn.Close()
+		}
+		// Despertar al lector que pudiera estar esperando crédito.
+		if s.creditCond != nil {
+			s.creditCond.Broadcast()
 		}
 	})
 }
@@ -181,12 +236,14 @@ func (m *Manager) acceptLoop(tunnelID string, ln net.Listener) {
 			ready:    make(chan struct{}),
 			failed:   make(chan struct{}),
 		}
+		s.initFlow()
 		m.register(s)
 
-		// Pedir al backend que abra el extremo destino.
+		// Pedir al backend que abra el extremo destino. FC=true anuncia soporte de
+		// control de flujo; sólo se activará si el dest también lo anuncia en el ack.
 		m.emit(proto.TunnelOpen{
 			Envelope: proto.Envelope{Type: proto.TypeTunnelOpen, Timestamp: time.Now().Unix()},
-			TunnelID: tunnelID, StreamID: streamID,
+			TunnelID: tunnelID, StreamID: streamID, FC: true,
 		})
 
 		go m.sourceStream(s)
@@ -238,14 +295,18 @@ func (m *Manager) StopListener(tunnelID string) {
 
 // ─── Rol dest: dial ────────────────────────────────────────────────────────────
 
-// OpenDest hace dial a host:port y, si tiene éxito, arranca el relay.
-func (m *Manager) OpenDest(tunnelID, streamID, host string, port int) {
+// OpenDest hace dial a host:port y, si tiene éxito, arranca el relay. peerFC indica si
+// el source soporta control de flujo (anunciado en tunnel_open); el gating se activa
+// sólo si ambos extremos lo soportan.
+func (m *Manager) OpenDest(tunnelID, streamID, host string, port int, peerFC bool) {
 	s := &stream{
 		tunnelID: tunnelID,
 		streamID: streamID,
 		inbox:    make(chan []byte, inboxBuffer),
 		done:     make(chan struct{}),
+		fc:       peerFC, // este extremo soporta FC; activo si el source también
 	}
+	s.initFlow()
 	m.register(s)
 
 	go func() {
@@ -262,9 +323,11 @@ func (m *Manager) OpenDest(tunnelID, streamID, host string, port int) {
 			return
 		}
 		s.conn = conn
+		// FC: peerFC hace eco de la capacidad negociada. Si el flag no llegó (backend
+		// antiguo que lo descarta), ambos extremos quedan sin gating (fallback limpio).
 		m.emit(proto.TunnelOpenAck{
 			Envelope: proto.Envelope{Type: proto.TypeTunnelOpenAck, Timestamp: time.Now().Unix()},
-			TunnelID: tunnelID, StreamID: streamID, OK: true,
+			TunnelID: tunnelID, StreamID: streamID, OK: true, FC: peerFC,
 		})
 		m.relay(s)
 	}()
@@ -272,8 +335,10 @@ func (m *Manager) OpenDest(tunnelID, streamID, host string, port int) {
 
 // ─── Despacho de mensajes del backend ──────────────────────────────────────────
 
-// Ack señala el resultado del dial en el extremo destino (rol source).
-func (m *Manager) Ack(streamID string, ok bool) {
+// Ack señala el resultado del dial en el extremo destino (rol source). peerFC indica
+// si el dest soporta control de flujo (anunciado en el ack); se fija ANTES de cerrar
+// `ready`, así el relay (que arranca tras `ready`) ya lo ve sin carrera.
+func (m *Manager) Ack(streamID string, ok, peerFC bool) {
 	m.mu.Lock()
 	s := m.streams[streamID]
 	m.mu.Unlock()
@@ -281,6 +346,7 @@ func (m *Manager) Ack(streamID string, ok bool) {
 		return
 	}
 	if ok {
+		s.fc = peerFC
 		safeClose(s.ready)
 	} else {
 		safeClose(s.failed)
@@ -311,6 +377,18 @@ func (m *Manager) Data(streamID string, b []byte) {
 		s.abort()
 		m.unregister(streamID)
 	}
+}
+
+// AddCredit aplica un crédito (tunnel_window) recibido del extremo opuesto: permite
+// al lector local→peer enviar `bytes` más.
+func (m *Manager) AddCredit(streamID string, bytes int) {
+	m.mu.Lock()
+	s := m.streams[streamID]
+	m.mu.Unlock()
+	if s == nil || bytes <= 0 {
+		return
+	}
+	s.addCredit(bytes)
 }
 
 // CloseStream cierra un stream por orden del extremo opuesto (EOF ordenado): drena lo
@@ -370,15 +448,32 @@ func (m *Manager) relay(s *stream) {
 					m.unregister(s.streamID)
 					return
 				}
+				// Conceder crédito al emisor del extremo opuesto: ya drenamos len(b).
+				if s.fc {
+					m.emit(proto.TunnelWindow{
+						Envelope: proto.Envelope{Type: proto.TypeTunnelWindow, Timestamp: time.Now().Unix()},
+						TunnelID: s.tunnelID, StreamID: s.streamID, Bytes: len(b),
+					})
+				}
 			}
 		}
 	}()
 
-	// Lector (local→peer): conn → tunnel_data. Al ver EOF señala el fin de ESTA
-	// dirección con tunnel_close (no aborta: la dirección contraria puede seguir).
+	// Lector (local→peer): conn → tunnel_data. Si hay control de flujo (s.fc), antes de
+	// leer espera crédito: si el receptor opuesto va lento, el crédito se agota y dejamos
+	// de leer el TCP local → backpressure al origen. Sin fc (peer antiguo) lee libremente
+	// (comportamiento previo). Al ver EOF señala el fin de ESTA dirección con tunnel_close
+	// (no aborta: la dirección contraria puede seguir).
 	buf := make([]byte, relayBufSize)
 	for {
-		n, err := s.conn.Read(buf)
+		budget := len(buf)
+		if s.fc {
+			budget = s.takeCredit(len(buf))
+			if budget == 0 {
+				return // stream cerrado mientras esperaba crédito
+			}
+		}
+		n, err := s.conn.Read(buf[:budget])
 		if n > 0 {
 			chunk := make([]byte, n)
 			copy(chunk, buf[:n])
@@ -387,6 +482,12 @@ func (m *Manager) relay(s *stream) {
 				TunnelID: s.tunnelID, StreamID: s.streamID,
 				Data: base64.StdEncoding.EncodeToString(chunk),
 			})
+			// Devolver el crédito no usado (leímos n ≤ budget).
+			if s.fc {
+				if rem := budget - n; rem > 0 {
+					s.addCredit(rem)
+				}
+			}
 		}
 		if err != nil {
 			m.emit(proto.TunnelClose{

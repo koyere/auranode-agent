@@ -35,6 +35,7 @@ const (
 	TypeTunnelData    = "tunnel_data"
 	TypeTunnelClose   = "tunnel_close"
 	TypeTunnelStatus  = "tunnel_status"
+	TypeTunnelWindow  = "tunnel_window" // control de flujo por créditos (receptor→emisor)
 )
 
 // ─── Operaciones del gestor de archivos (SFTP) ───────────────────────────────
@@ -259,6 +260,9 @@ type TunnelOpen struct {
 	StreamID string `json:"stream_id"`
 	Host     string `json:"host,omitempty"`
 	Port     int    `json:"port,omitempty"`
+	// FC indica que el source soporta control de flujo por créditos. El gating sólo
+	// se activa si AMBOS extremos lo anuncian (compat. con versiones antiguas).
+	FC bool `json:"fc,omitempty"`
 }
 
 type TunnelOpenAck struct {
@@ -267,6 +271,7 @@ type TunnelOpenAck struct {
 	StreamID string `json:"stream_id"`
 	OK       bool   `json:"ok"`
 	Error    string `json:"error,omitempty"`
+	FC       bool   `json:"fc,omitempty"` // el dest soporta control de flujo por créditos
 }
 
 type TunnelData struct {
@@ -281,6 +286,17 @@ type TunnelClose struct {
 	TunnelID string `json:"tunnel_id"`
 	StreamID string `json:"stream_id"`
 	Error    string `json:"error,omitempty"`
+}
+
+// TunnelWindow es el control de flujo por créditos: el receptor, tras escribir
+// `bytes` en su conexión local, concede ese crédito al emisor del extremo opuesto
+// para que pueda enviar esa misma cantidad. Mantiene los bytes en vuelo por stream
+// y dirección acotados a la ventana, aplicando backpressure real (TCP) al origen.
+type TunnelWindow struct {
+	Envelope
+	TunnelID string `json:"tunnel_id"`
+	StreamID string `json:"stream_id"`
+	Bytes    int    `json:"bytes"`
 }
 
 type TunnelStatus struct {
