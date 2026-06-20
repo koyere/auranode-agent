@@ -1,0 +1,52 @@
+version: 2
+project_name: auranode-agent
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: auranode-agent
+    main: ./cmd/auranode-agent
+    binary: auranode-agent
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux            # El agente solo corre en Linux
+    goarch:
+      - amd64
+      - arm64
+      - arm
+    goarm:
+      - "7"
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .Commit }}
+      - -X main.date={{ .Date }}
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    # amd64 -> auranode-agent_1.0.0_linux_amd64.tar.gz
+    # arm64 -> auranode-agent_1.0.0_linux_arm64.tar.gz
+    # armv7 -> auranode-agent_1.0.0_linux_armv7.tar.gz
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+release:
+  draft: false
+  prerelease: auto   # Los tags v1.0.0-beta.1 quedan como pre-release automáticamente
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"

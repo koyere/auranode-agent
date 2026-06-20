@@ -1,0 +1,39 @@
+# Plantilla de referencia. El instalador (install.sh) genera este archivo
+# automáticamente en /etc/systemd/system/auranode-agent.service.
+[Unit]
+Description=AuraNode Agent
+Documentation=https://docs.auranode.app/agent
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=auranode
+Group=auranode
+EnvironmentFile=/etc/auranode/agent.env
+ExecStart=/usr/local/bin/auranode-agent
+Restart=on-failure
+RestartSec=10s
+TimeoutStopSec=30s
+
+# Hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/auranode /var/log/auranode
+ProtectHome=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# Recursos
+MemoryMax=256M
+CPUQuota=20%
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=auranode-agent
+
+[Install]
+WantedBy=multi-user.target

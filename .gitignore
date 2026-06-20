@@ -1,0 +1,18 @@
+# Binarios y artefactos de build
+/bin/
+/dist/
+/auranode-agent
+*.exe
+
+# Buffer offline / datos locales
+*.db
+*.bolt
+
+# Entorno
+.env
+.env.*
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
