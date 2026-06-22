@@ -1,7 +1,7 @@
-// Package updater implementa el modelo check-and-notify: el agente comprueba
-// periódicamente si hay una versión más reciente en GitHub Releases y lo notifica
-// (log + mensaje al backend). NO se auto-reemplaza el binario, para preservar el
-// hardening del servicio (usuario no-root, binario root, ProtectSystem=strict).
+// Package updater implements the check-and-notify model: the agent checks
+// periodically whether a newer version exists on GitHub Releases and notifies
+// (log + message to the backend). It does NOT self-replace the binary, to preserve the
+// service hardening (non-root user, root binary, ProtectSystem=strict).
 package updater
 
 import (
@@ -19,7 +19,7 @@ import (
 
 const githubLatestURL = "https://api.github.com/repos/koyere/auranode-agent/releases/latest"
 
-// Updater consulta GitHub y avisa cuando hay una versión más reciente.
+// Updater queries GitHub and reports when a newer version is available.
 type Updater struct {
 	current    string
 	log        *zap.Logger
@@ -29,11 +29,11 @@ type Updater struct {
 	firstDelay time.Duration
 
 	mu          sync.Mutex
-	latestKnown string // última versión detectada (>actual); "" si no hay
+	latestKnown string // latest detected version (>current); "" if none
 }
 
-// New crea un Updater. notify se invoca (si no es nil) cuando se detecta por
-// primera vez una versión más reciente.
+// New creates an Updater. notify is invoked (if not nil) when a newer version
+// is detected for the first time.
 func New(currentVersion string, log *zap.Logger, notify func(current, latest string)) *Updater {
 	return &Updater{
 		current:    currentVersion,
@@ -45,11 +45,11 @@ func New(currentVersion string, log *zap.Logger, notify func(current, latest str
 	}
 }
 
-// Start lanza el chequeo periódico en background (primera comprobación tras
-// firstDelay para no golpear GitHub en cada arranque/reinicio).
+// Start launches the periodic check in the background (first check after
+// firstDelay to avoid hitting GitHub on every start/restart).
 func (u *Updater) Start(ctx context.Context) {
 	if u.current == "" || u.current == "dev" {
-		u.log.Debug("updater: versión de desarrollo, auto-check deshabilitado")
+		u.log.Debug("updater: development version, auto-check disabled")
 		return
 	}
 	go func() {
@@ -67,7 +67,7 @@ func (u *Updater) Start(ctx context.Context) {
 	}()
 }
 
-// LatestKnown devuelve la última versión más reciente detectada (>actual), o "".
+// LatestKnown returns the latest newer version detected (>current), or "".
 func (u *Updater) LatestKnown() string {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -77,7 +77,7 @@ func (u *Updater) LatestKnown() string {
 func (u *Updater) checkOnce(ctx context.Context) {
 	latest, err := u.fetchLatest(ctx)
 	if err != nil {
-		u.log.Debug("updater: no se pudo consultar la última versión", zap.Error(err))
+		u.log.Debug("updater: could not query the latest version", zap.Error(err))
 		return
 	}
 	if !isNewer(u.current, latest) {
@@ -90,7 +90,7 @@ func (u *Updater) checkOnce(ctx context.Context) {
 	if !changed {
 		return
 	}
-	u.log.Warn("hay una versión más reciente del agente disponible",
+	u.log.Warn("a newer agent version is available",
 		zap.String("current", u.current),
 		zap.String("latest", latest),
 		zap.String("howto", "reinstala: curl -fsSL https://get.auranode.app/agent | sudo -E bash"),
@@ -122,13 +122,13 @@ func (u *Updater) fetchLatest(ctx context.Context) (string, error) {
 	}
 	tag := strings.TrimSpace(strings.TrimPrefix(body.TagName, "v"))
 	if tag == "" {
-		return "", fmt.Errorf("tag_name vacío")
+		return "", fmt.Errorf("empty tag_name")
 	}
 	return tag, nil
 }
 
 // isNewer compara semver simple (major.minor.patch). Las pre-releases se
-// ignoran (se comparan solo los tres números).
+// are ignored (only the three numbers are compared).
 func isNewer(current, latest string) bool {
 	c := parseSemver(current)
 	l := parseSemver(latest)

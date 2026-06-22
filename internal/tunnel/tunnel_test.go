@@ -16,10 +16,10 @@ import (
 	"github.com/koyere/auranode-agent/pkg/proto"
 )
 
-// relay conecta dos managers (source y dest) en memoria, emulando el relay del
-// backend: enruta cada mensaje emitido por un extremo al método correspondiente del
-// otro. Para tunnel_open inyecta el host/puerto destino (lo que en producción añade
-// el backend a partir de la ruta del túnel).
+// relay connects two managers (source and dest) in memory, emulating the backend
+// relay: it routes each message emitted by one end to the corresponding method of the
+// other. For tunnel_open it injects the destination host/port (what in production the
+// backend adds from the tunnel's route).
 type relay struct {
 	mu           sync.Mutex
 	source, dest *Manager
@@ -59,7 +59,7 @@ func (r *relay) fromDest(msg any) error {
 	return nil
 }
 
-// startEcho levanta un servidor TCP que devuelve todo lo que recibe.
+// startEcho starts a TCP server that echoes back everything it receives.
 func startEcho(t *testing.T) (string, int, func()) {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -90,7 +90,7 @@ func newWiredPair(t *testing.T, destHost string, destPort int) (*Manager, *relay
 	return src, r
 }
 
-// freePort reserva un puerto local libre para el listener del source.
+// freePort reserves a free local port for the source's listener.
 func freePort(t *testing.T) int {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -102,10 +102,10 @@ func freePort(t *testing.T) int {
 	return p
 }
 
-// TestRoundTripIntegrity verifica el camino completo source→dest→echo→source con un
-// payload grande (multi-chunk), comprobando integridad byte a byte. Cubre el relay,
-// el ack, el chunking y, sobre todo, el drenaje ordenado del inbox al cerrar (el
-// bug que truncaba el final del stream).
+// TestRoundTripIntegrity verifies the full source→dest→echo→source path with a
+// large payload (multi-chunk), checking byte-for-byte integrity. It covers the relay,
+// the ack, the chunking and, above all, the orderly inbox drain on close (the
+// bug that truncated the end of the stream).
 func TestRoundTripIntegrity(t *testing.T) {
 	host, port, stop := startEcho(t)
 	defer stop()
@@ -114,7 +114,7 @@ func TestRoundTripIntegrity(t *testing.T) {
 	lport := freePort(t)
 	src.StartListener("tun-1", lport, "")
 	defer src.StopListener("tun-1")
-	time.Sleep(50 * time.Millisecond) // dejar que el listener arranque
+	time.Sleep(50 * time.Millisecond) // let the listener start
 
 	conn, err := net.Dial("tcp", net.JoinHostPort("127.0.0.1", itoa(lport)))
 	if err != nil {
@@ -125,8 +125,8 @@ func TestRoundTripIntegrity(t *testing.T) {
 	payload := make([]byte, 1<<20) // 1 MB → ~32 chunks
 	rand.Read(payload)
 
-	// Escribir todo y, al terminar, cerrar el lado de escritura para que el echo
-	// devuelva EOF tras el último byte.
+	// Write everything and, when done, close the write side so the echo
+	// returns EOF after the last byte.
 	go func() {
 		conn.Write(payload)
 		conn.(*net.TCPConn).CloseWrite()
@@ -150,14 +150,14 @@ func TestRoundTripIntegrity(t *testing.T) {
 		t.Fatalf("longitud: esperado %d, recibido %d", len(payload), len(got))
 	}
 	if !bytes.Equal(got, payload) {
-		t.Fatal("payload corrupto: el round-trip no preservó los bytes")
+		t.Fatal("corrupt payload: the round-trip did not preserve the bytes")
 	}
 }
 
-// TestDestDialFailure verifica que, si el destino no acepta conexiones, el stream del
-// source se cierra (no queda colgado) vía el tunnel_open_ack con OK=false.
+// TestDestDialFailure verifies that, if the destination does not accept connections, the
+// source's stream is closed (does not hang) via tunnel_open_ack with OK=false.
 func TestDestDialFailure(t *testing.T) {
-	// Puerto destino cerrado: reservamos uno y lo liberamos.
+	// Destination port closed: we reserve one and release it.
 	deadPort := freePort(t)
 
 	src, _ := newWiredPair(t, "127.0.0.1", deadPort)
@@ -172,17 +172,17 @@ func TestDestDialFailure(t *testing.T) {
 	}
 	defer conn.Close()
 
-	// La conexión local debe cerrarse al fallar el dial destino.
+	// The local connection must close when the destination dial fails.
 	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	b := make([]byte, 1)
 	_, err = conn.Read(b)
 	if err == nil {
-		t.Fatal("se esperaba cierre de la conexión local al fallar el dial destino")
+		t.Fatal("expected the local connection to close when the destination dial fails")
 	}
 }
 
-// startSender levanta un servidor TCP que, al aceptar, ENVÍA `payload` y cierra (sin
-// leer). Modela un flujo unidireccional servidor→cliente para probar backpressure.
+// startSender starts a TCP server that, on accept, SENDS `payload` and closes (without
+// reading). Models a unidirectional server→client flow to test backpressure.
 func startSender(t *testing.T, payload []byte) (string, int, func()) {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -202,12 +202,12 @@ func startSender(t *testing.T, payload []byte) (string, int, func()) {
 	return "127.0.0.1", addr.Port, func() { ln.Close() }
 }
 
-// TestSlowConsumerBackpressure verifica que un consumidor sostenidamente lento NO
-// provoca reset del stream (antes el inbox se saturaba y se reseteaba): el control de
-// flujo por créditos aplica backpressure y entrega el payload íntegro. Flujo
-// unidireccional (servidor→cliente) para aislar el backpressure de una dirección.
+// TestSlowConsumerBackpressure verifies that a sustained slow consumer does NOT
+// cause a stream reset (previously the inbox saturated and reset): credit-based flow
+// control applies backpressure and delivers the full payload. Unidirectional flow
+// (server→client) to isolate one direction's backpressure.
 func TestSlowConsumerBackpressure(t *testing.T) {
-	payload := make([]byte, 4<<20) // 4 MB ≫ ventana (256KB): fuerza muchos ciclos de crédito
+	payload := make([]byte, 4<<20) // 4 MB ≫ window (256KB): forces many credit cycles
 	rand.Read(payload)
 
 	host, port, stop := startSender(t, payload)
@@ -225,8 +225,8 @@ func TestSlowConsumerBackpressure(t *testing.T) {
 	}
 	defer conn.Close()
 
-	// Consumidor lento: lee en trozos pequeños con pausas. Sin backpressure el inbox
-	// se saturaría; con créditos el emisor se frena y nada se pierde.
+	// Slow consumer: reads in small chunks with pauses. Without backpressure the inbox
+	// would saturate; with credits the sender throttles and nothing is lost.
 	got := make([]byte, 0, len(payload))
 	buf := make([]byte, 16*1024)
 	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
@@ -234,7 +234,7 @@ func TestSlowConsumerBackpressure(t *testing.T) {
 		n, err := conn.Read(buf)
 		got = append(got, buf[:n]...)
 		if n > 0 {
-			time.Sleep(1 * time.Millisecond) // ralentiza el consumo
+			time.Sleep(1 * time.Millisecond) // slows down consumption
 		}
 		if err != nil {
 			break
@@ -248,7 +248,7 @@ func TestSlowConsumerBackpressure(t *testing.T) {
 		t.Fatalf("longitud: esperado %d, recibido %d", len(payload), len(got))
 	}
 	if !bytes.Equal(got, payload) {
-		t.Fatal("payload corrupto con consumidor lento: backpressure no preservó los bytes")
+		t.Fatal("corrupt payload with a slow consumer: backpressure did not preserve the bytes")
 	}
 }
 

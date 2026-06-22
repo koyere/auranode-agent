@@ -1,15 +1,15 @@
-// Package migration implementa el plano de datos de las migraciones Tipo B
-// (directorio) en el agente, modo relay: el backend coordina por WebSocket y reenvía
-// los mensajes de datos entre los dos agentes.
+// Package migration implements the data plane of Type B migrations
+// (directory) in the agent, relay mode: the backend coordinates over WebSocket and
+// forwards the data messages between the two agents.
 //
-// Roles por migración:
-//   - source: estima el tamaño (migration_estimate_req), y al recibir migration_start
-//     recorre el directorio y envía cada archivo en chunks con control de flujo por
-//     ventana (espera migration_window_ack) e integridad (CRC32 por chunk, SHA-256 por
-//     archivo verificado por el destino con migration_file_ack).
-//   - dest: al recibir migration_prepare comprueba espacio y carga el manifest de
-//     reanudación; recibe los archivos, los escribe, verifica integridad, actualiza el
-//     manifest y emite los acks.
+// Roles per migration:
+//   - source: estimates the size (migration_estimate_req), and on migration_start
+//     walks the directory and sends each file in chunks with windowed flow control
+//     (waits for migration_window_ack) and integrity (CRC32 per chunk, SHA-256 per
+//     file verified by the destination via migration_file_ack).
+//   - dest: on migration_prepare checks free space and loads the resume
+//     manifest; receives the files, writes them, verifies integrity, updates the
+//     manifest and emits the acks.
 package migration
 
 import (
@@ -37,14 +37,14 @@ import (
 const (
 	progressInterval = 5 * time.Second
 	maxFileRetries   = 3
-	windowAckEvery   = 1 << 20 // emite window_ack cada ~1MB escritos
+	windowAckEvery   = 1 << 20 // emit window_ack every ~1MB written
 )
 
-// Manager gestiona las sesiones de migración del agente (puede ser source de una y
-// dest de otra simultáneamente).
+// Manager manages the agent's migration sessions (it can be source of one and
+// dest of another simultaneously).
 type Manager struct {
 	log      *zap.Logger
-	stateDir string // base para los manifests de reanudación (rol dest)
+	stateDir string // base for the resume manifests (dest role)
 
 	mu     sync.Mutex
 	sendFn func(any) error
@@ -61,14 +61,14 @@ func New(log *zap.Logger, stateDir string) *Manager {
 	}
 }
 
-// SetSend asigna la función de envío de la conexión activa (nil al desconectar).
+// SetSend sets the send function of the active connection (nil on disconnect).
 func (m *Manager) SetSend(fn func(any) error) {
 	m.mu.Lock()
 	m.sendFn = fn
 	m.mu.Unlock()
 }
 
-// Shutdown cancela todas las sesiones activas (al perder la conexión al backend).
+// Shutdown cancels all active sessions (when the backend connection is lost).
 func (m *Manager) Shutdown() {
 	m.mu.Lock()
 	srcs := m.srcs
@@ -93,7 +93,7 @@ func (m *Manager) emit(msg any) {
 	}
 }
 
-// Handle despacha un mensaje migration_* recibido del backend.
+// Handle dispatches a migration_* message received from the backend.
 func (m *Manager) Handle(msgType string, raw []byte) {
 	var msg proto.MigrationMsg
 	if json.Unmarshal(raw, &msg) != nil || msg.MigrationID == "" {
@@ -109,13 +109,13 @@ func (m *Manager) Handle(msgType string, raw []byte) {
 	case proto.TypeMigrationCancel:
 		m.cancel(msg.MigrationID)
 
-	// Rol source recibe del dest (relay):
+	// Source role receives from the dest (relay):
 	case proto.TypeMigrationFileAck:
 		m.srcFileAck(msg)
 	case proto.TypeMigrationWindowAck:
 		m.srcWindowAck(msg)
 
-	// Rol dest recibe del source (relay) — en orden, en la goroutine lectora:
+	// Dest role receives from the source (relay) — in order, on the reader goroutine:
 	case proto.TypeMigrationFile:
 		m.dstFile(msg)
 	case proto.TypeMigrationChunk:
@@ -140,7 +140,7 @@ func (m *Manager) cancel(id string) {
 	}
 }
 
-// ─── Estimación (rol source, pre-check) ────────────────────────────────────────
+// ─── Estimation (source role, pre-check) ──────────────────────────────────────
 
 func (m *Manager) estimate(msg proto.MigrationMsg) {
 	res := proto.MigrationMsg{
@@ -156,7 +156,7 @@ func (m *Manager) estimate(msg proto.MigrationMsg) {
 	})
 	if err != nil {
 		res.Code = "TRANSFER_SOURCE_FILE_MISSING"
-		res.Message = fmt.Sprintf("No se pudo leer el origen: %v", err)
+		res.Message = fmt.Sprintf("Could not read the source: %v", err)
 	} else {
 		res.TotalBytes = totalBytes
 		res.TotalFiles = totalFiles
@@ -164,15 +164,15 @@ func (m *Manager) estimate(msg proto.MigrationMsg) {
 	m.emit(res)
 }
 
-// ─── Rol source: transferencia ─────────────────────────────────────────────────
+// ─── Source role: transfer ─────────────────────────────────────────────────────
 
 type srcSession struct {
 	id        string
 	done      chan struct{}
 	closeOnce sync.Once
 
-	fileAck   chan bool  // dest verificó el archivo en curso
-	windowAck chan int64 // bytes acumulados confirmados por el dest (control de flujo)
+	fileAck   chan bool  // dest verified the current file
+	windowAck chan int64 // cumulative bytes acked by the dest (flow control)
 }
 
 func (s *srcSession) cancel() { s.closeOnce.Do(func() { close(s.done) }) }
@@ -207,13 +207,13 @@ func (m *Manager) startSource(msg proto.MigrationMsg) {
 		window = 8 << 20
 	}
 
-	// Conjunto de reanudación: archivos ya completados en el destino (path→size+mtime).
+	// Resume set: files already completed on the destination (path→size+mtime).
 	completed := make(map[string]proto.MigrationFileInfo, len(msg.Completed))
 	for _, f := range msg.Completed {
 		completed[f.Path] = f
 	}
 
-	// Listado determinista de archivos.
+	// Deterministic file listing.
 	type fileEntry struct {
 		abs  string
 		rel  string
@@ -242,7 +242,7 @@ func (m *Manager) startSource(msg proto.MigrationMsg) {
 		fileID           uint32
 	)
 
-	// Reporte de progreso periódico.
+	// Periodic progress report.
 	stopProgress := make(chan struct{})
 	go m.progressLoop(s, msg.MigrationID, &bytesTransferred, bytesTotal, &filesCompleted, len(files), stopProgress)
 	defer close(stopProgress)
@@ -250,11 +250,11 @@ func (m *Manager) startSource(msg proto.MigrationMsg) {
 	for _, f := range files {
 		select {
 		case <-s.done:
-			return // cancelada
+			return // cancelled
 		default:
 		}
 
-		// Reanudación: saltar si ya está completo (mismo size+mtime).
+		// Resume/delta: skip if already complete (same size+mtime).
 		if c, ok := completed[f.rel]; ok && c.Size == f.info.Size() && c.Mtime == f.info.ModTime().Unix() {
 			bytesTransferred += f.info.Size()
 			filesCompleted++
@@ -289,13 +289,13 @@ func (m *Manager) startSource(msg proto.MigrationMsg) {
 	})
 }
 
-// sendFile envía un archivo completo con control de flujo y reintentos. Devuelve
-// (ok, warning, errFatal). ok=false con warning si el archivo cambió/desapareció.
+// sendFile sends a whole file with flow control and retries. Returns
+// (ok, warning, errFatal). ok=false with a warning if the file changed/disappeared.
 func (m *Manager) sendFile(s *srcSession, migID, abs, rel string, info os.FileInfo, fileID uint32,
 	chunkSize int, window int64, bytesTransferred *int64) (bool, *proto.MigrationWarning, error) {
 
 	for attempt := 0; attempt < maxFileRetries; attempt++ {
-		// Vaciar acks colgados de un intento previo.
+		// Drain stale acks from a previous attempt.
 		drain(s.fileAck)
 		drainInt(s.windowAck)
 
@@ -303,12 +303,12 @@ func (m *Manager) sendFile(s *srcSession, migID, abs, rel string, info os.FileIn
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				return false, &proto.MigrationWarning{Code: "TRANSFER_SOURCE_FILE_MISSING", File: rel,
-					Message: "El archivo desapareció durante la transferencia."}, nil
+					Message: "The file disappeared during the transfer."}, nil
 			}
 			return false, nil, err
 		}
 
-		// SHA-256 del archivo (primera pasada).
+		// SHA-256 of the file (first pass).
 		sum, serrHash := fileSHA256(f)
 		if serrHash != nil {
 			f.Close()
@@ -319,7 +319,7 @@ func (m *Manager) sendFile(s *srcSession, migID, abs, rel string, info os.FileIn
 			return false, nil, err
 		}
 
-		// Cabecera del archivo.
+		// File header.
 		m.emit(proto.MigrationMsg{
 			Envelope:    proto.Envelope{Type: proto.TypeMigrationFile, Timestamp: time.Now().Unix()},
 			MigrationID: migID,
@@ -337,7 +337,7 @@ func (m *Manager) sendFile(s *srcSession, migID, abs, rel string, info os.FileIn
 			return false, nil, sentErr
 		}
 
-		// Fin de archivo → esperar verificación del dest.
+		// End of file → wait for the dest's verification.
 		m.emit(proto.MigrationMsg{
 			Envelope:    proto.Envelope{Type: proto.TypeMigrationFileDone, Timestamp: time.Now().Unix()},
 			MigrationID: migID, FileID: fileID,
@@ -350,28 +350,28 @@ func (m *Manager) sendFile(s *srcSession, migID, abs, rel string, info os.FileIn
 			if ok {
 				return true, nil, nil
 			}
-			// Verificación falló: reintentar el archivo (rebobinar el contador).
+			// Verification failed: retry the file (rewind the counter).
 			*bytesTransferred = startBytes
 			m.log.Warn("migration: archivo rechazado por el destino, reintentando",
 				zap.String("file", rel), zap.Int("attempt", attempt+1))
 		case <-time.After(2 * time.Minute):
-			return false, nil, errors.New("timeout esperando verificación del destino")
+			return false, nil, errors.New("timeout waiting for the destination verification")
 		}
 	}
 	return false, &proto.MigrationWarning{Code: "TRANSFER_CHUNK_MAX_RETRIES", File: rel,
-		Message: "El archivo falló la verificación 3 veces."}, nil
+		Message: "The file failed verification 3 times."}, nil
 }
 
-// streamChunks envía los chunks de un archivo respetando la ventana de control de flujo.
+// streamChunks sends a file's chunks respecting the flow-control window.
 func (m *Manager) streamChunks(s *srcSession, migID string, f *os.File, fileID uint32,
 	chunkSize int, window int64, startBytes int64, bytesTransferred *int64) error {
 
 	buf := make([]byte, chunkSize)
 	var offset int64
-	var acked int64 // bytes confirmados por el dest para ESTE archivo
+	var acked int64 // bytes acked by the dest for THIS file
 
 	for {
-		// Control de flujo: no superar la ventana de bytes sin confirmar.
+		// Flow control: do not exceed the window of unacked bytes.
 		for offset-acked >= window {
 			select {
 			case <-s.done:
@@ -405,7 +405,7 @@ func (m *Manager) streamChunks(s *srcSession, migID string, f *os.File, fileID u
 			return err
 		}
 
-		// Consumir acks pendientes sin bloquear (libera ventana).
+		// Consume pending acks without blocking (frees window).
 		for {
 			select {
 			case a := <-s.windowAck:
@@ -484,18 +484,18 @@ func (m *Manager) fail(migID, code, message string) {
 	})
 }
 
-// ─── Rol dest: recepción ───────────────────────────────────────────────────────
+// ─── Dest role: reception ──────────────────────────────────────────────────────
 
 type dstSession struct {
 	id           string
 	destPath     string
 	manifestPath string
-	manifestFile *os.File // log append-only (JSONL) para el manifest de reanudación
+	manifestFile *os.File // append-only log (JSONL) for the resume manifest
 
 	mu        sync.Mutex
 	completed map[string]proto.MigrationFileInfo
 
-	// Archivo en curso.
+	// File in progress.
 	curFileID uint32
 	curRel    string
 	curPath   string
@@ -520,8 +520,8 @@ func (d *dstSession) close() {
 	}
 }
 
-// recordCompleted persiste un archivo completado en el log append-only del manifest.
-// O(1) por archivo (a diferencia de reescribir todo el mapa), y resistente a crashes.
+// recordCompleted persists a completed file in the manifest's append-only log.
+// O(1) per file (vs. rewriting the whole map), and crash-resistant.
 func (d *dstSession) recordCompleted(info proto.MigrationFileInfo) {
 	d.completed[info.Path] = info
 	if d.manifestFile == nil {
@@ -543,7 +543,7 @@ func (m *Manager) prepare(msg proto.MigrationMsg) {
 
 	if !filepath.IsAbs(msg.DestPath) || filepath.Clean(msg.DestPath) != msg.DestPath {
 		res.Code = "TRANSFER_PERMISSION_DENIED"
-		res.Message = "La ruta de destino no es válida."
+		res.Message = "The destination path is not valid."
 		m.emit(res)
 		return
 	}
@@ -579,11 +579,42 @@ func (m *Manager) prepare(msg proto.MigrationMsg) {
 	m.dsts[msg.MigrationID] = d
 	m.mu.Unlock()
 
-	// Manifest de reanudación → el origen saltará los archivos ya completados.
-	for _, f := range completed {
+	// Continuous sync (Type C): scan the files already present under dest_path and
+	// add them to the manifest. The source will skip those matching on size+mtime, so
+	// only new/changed files are transferred (delta). The dest preserves the source's
+	// mtime when writing (Chtimes), so after a sync the mtimes line up.
+	if msg.Delta {
+		scanned := scanDestManifest(msg.DestPath, msg.ExcludePaths)
+		for rel, info := range scanned {
+			if _, ok := d.completed[rel]; !ok {
+				d.completed[rel] = info
+			}
+		}
+	}
+
+	// Manifest (resume + delta) → the source will skip files already present.
+	for _, f := range d.completed {
 		res.Completed = append(res.Completed, f)
 	}
 	m.emit(res)
+}
+
+// scanDestManifest walks the regular files already present under destPath and
+// returns a manifest rel→{size,mtime,mode} for delta-sync. It honors the same
+// exclusions (efficiency); read errors are ignored (best-effort).
+func scanDestManifest(destPath string, exclude []string) map[string]proto.MigrationFileInfo {
+	out := make(map[string]proto.MigrationFileInfo)
+	_ = walkFiles(destPath, exclude, func(abs string, info os.FileInfo) error {
+		rel := relPath(destPath, abs)
+		out[rel] = proto.MigrationFileInfo{
+			Path:  rel,
+			Size:  info.Size(),
+			Mtime: info.ModTime().Unix(),
+			Mode:  uint32(info.Mode().Perm()),
+		}
+		return nil
+	})
+	return out
 }
 
 func (m *Manager) dstSession(id string) *dstSession {
@@ -600,7 +631,7 @@ func (m *Manager) dstFile(msg proto.MigrationMsg) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	// Cerrar cualquier archivo previo no finalizado.
+	// Close any previous unfinished file.
 	if d.curFile != nil {
 		d.curFile.Close()
 		d.curFile = nil
@@ -647,7 +678,7 @@ func (m *Manager) dstChunk(msg proto.MigrationMsg) {
 
 	raw, err := base64.StdEncoding.DecodeString(msg.Data)
 	if err != nil || crc32.ChecksumIEEE(raw) != msg.CRC32 {
-		// Chunk corrupto: marcar el archivo como roto; fallará la verificación → reenvío.
+		// Corrupt chunk: mark the file as broken; verification will fail → resend.
 		d.curBroken = true
 		return
 	}
@@ -659,7 +690,7 @@ func (m *Manager) dstChunk(msg proto.MigrationMsg) {
 	d.curHash.Write(raw) //nolint:errcheck
 	d.curWritten += int64(len(raw))
 
-	// Control de flujo: confirmar bytes escritos cada ~windowAckEvery.
+	// Flow control: ack written bytes every ~windowAckEvery.
 	if d.curWritten-d.curAcked >= windowAckEvery {
 		d.curAcked = d.curWritten
 		m.emit(proto.MigrationMsg{
@@ -693,7 +724,7 @@ func (m *Manager) dstFileDone(msg proto.MigrationMsg) {
 	}
 
 	if ok {
-		// Restaurar permisos y mtime; registrar en el manifest.
+		// Restore permissions and mtime; record in the manifest.
 		if d.curInfo.Mode != 0 {
 			os.Chmod(d.curPath, os.FileMode(d.curInfo.Mode)) //nolint:errcheck
 		}
@@ -705,7 +736,7 @@ func (m *Manager) dstFileDone(msg proto.MigrationMsg) {
 			Path: d.curRel, Size: d.curInfo.Size, Mtime: d.curInfo.Mtime, Sha256: d.curInfo.Sha256,
 		})
 	} else {
-		// Verificación fallida: borrar el archivo parcial para reintentar limpio.
+		// Verification failed: delete the partial file to retry cleanly.
 		if d.curPath != "" {
 			os.Remove(d.curPath) //nolint:errcheck
 		}
@@ -722,7 +753,7 @@ func (m *Manager) dstFileDone(msg proto.MigrationMsg) {
 
 // ─── Utilidades ────────────────────────────────────────────────────────────────
 
-// walkFiles recorre srcPath y llama fn por cada archivo regular no excluido.
+// walkFiles walks srcPath and calls fn for each non-excluded regular file.
 func walkFiles(srcPath string, exclude []string, fn func(abs string, info os.FileInfo) error) error {
 	info, err := os.Stat(srcPath)
 	if err != nil {
@@ -742,7 +773,7 @@ func walkFiles(srcPath string, exclude []string, fn func(abs string, info os.Fil
 			return nil
 		}
 		if !fi.Mode().IsRegular() {
-			return nil // saltar dirs, symlinks, sockets, devices
+			return nil // skip dirs, symlinks, sockets, devices
 		}
 		return fn(p, fi)
 	})
@@ -768,8 +799,8 @@ func relPath(base, abs string) string {
 	return r
 }
 
-// safeJoin une base+rel y rechaza el resultado si escapa de base (path traversal
-// desde un origen comprometido). filepath.Join normaliza el ".." antes de comprobar.
+// safeJoin joins base+rel and rejects the result if it escapes base (path traversal
+// from a compromised source). filepath.Join normalizes the ".." before checking.
 func safeJoin(base, rel string) (string, bool) {
 	joined := filepath.Join(base, rel)
 	if joined != base && !strings.HasPrefix(joined, base+string(os.PathSeparator)) {
@@ -794,8 +825,8 @@ func availableBytes(path string) (int64, error) {
 	return int64(st.Bavail) * int64(st.Bsize), nil
 }
 
-// loadManifest reconstruye el conjunto de archivos completados desde el log JSONL
-// append-only (una entrada por línea; la última de cada path gana).
+// loadManifest rebuilds the set of completed files from the JSONL log
+// append-only (one entry per line; the last one per path wins).
 func loadManifest(path string) map[string]proto.MigrationFileInfo {
 	out := make(map[string]proto.MigrationFileInfo)
 	data, err := os.ReadFile(path)

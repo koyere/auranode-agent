@@ -1,54 +1,52 @@
-# Política de Seguridad — AuraNode Agent
+# Security Policy — AuraNode Agent
 
-La seguridad del agente es prioritaria: corre en los servidores de nuestros usuarios.
-Este repositorio es **público y auditable** precisamente para que cualquiera pueda
-revisar exactamente qué ejecuta el agente.
+Agent security is a top priority: it runs on our users' servers. This repository is
+**public and auditable** precisely so that anyone can review exactly what the agent runs.
 
-## Reportar una vulnerabilidad
+## Reporting a vulnerability
 
 - Email: **security@auranode.app**
-- Acuse de recibo: **48 horas**
-- Evaluación inicial: **7 días**
+- Acknowledgement: **48 hours**
+- Initial assessment: **7 days**
 
-Por favor incluye pasos de reproducción y el impacto estimado. No abras un issue
-público para vulnerabilidades.
+Please include reproduction steps and the estimated impact. Do not open a public issue
+for vulnerabilities.
 
 ### Safe harbor
 
-No emprenderemos acciones legales contra investigadores de buena fe que sigan esta
-política y eviten la destrucción de datos o la interrupción del servicio. Los reportes
-válidos se reconocen públicamente (Hall of Fame) si el reportante lo desea.
+We will not take legal action against good-faith researchers who follow this policy and
+avoid data destruction or service disruption. Valid reports are publicly acknowledged
+(Hall of Fame) if the reporter wishes.
 
-## Alcance
+## Scope
 
-**En scope:**
-- El código del agente de este repositorio
-- El script de instalación `install.sh`
-- La plantilla de servicio systemd y el `Dockerfile`
+**In scope:**
+- The agent code in this repository
+- The `install.sh` installation script
+- The systemd service template and the `Dockerfile`
 
-**Fuera de scope:**
-- Los VPS de los usuarios (configuración propia)
-- El backend / panel de AuraNode (reportar igualmente a security@auranode.app)
+**Out of scope:**
+- Users' VPS (their own configuration)
+- The AuraNode backend / panel (report those to security@auranode.app as well)
 
-## Garantías de seguridad del agente
+## Agent security guarantees
 
-- **Sin privilegios:** corre como usuario de sistema `auranode` (no root), con
-  `NoNewPrivileges`, `ProtectSystem=strict`, `CapabilityBoundingSet=` vacío y límites
-  de CPU/memoria en systemd.
-- **Token protegido:** el token vive en `/etc/auranode/agent.env` con permisos `600`,
-  nunca en argumentos de proceso (`ps aux`) ni en logs.
-- **Comunicación cifrada:** TLS con verificación de certificado contra el backend.
-  No existe modo `InsecureSkipVerify`.
-- **Integridad del binario:** cada release incluye `checksums.txt` (SHA256) y el
-  instalador verifica el hash antes de instalar.
-- **Ejecución remota auditada:** los comandos provienen de una acción humana
-  confirmada en el panel y quedan en el audit log; el daño está acotado por correr
-  sin privilegios.
+- **Unprivileged:** runs as the `auranode` system user (not root), with
+  `NoNewPrivileges`, `ProtectSystem=strict`, an empty `CapabilityBoundingSet=` and
+  CPU/memory limits in systemd.
+- **Protected token:** the token lives in `/etc/auranode/agent.env` with `600`
+  permissions, never in process arguments (`ps aux`) or logs.
+- **Encrypted communication:** TLS with certificate verification against the backend.
+  There is no `InsecureSkipVerify` mode.
+- **Binary integrity:** each release includes `checksums.txt` (SHA256) and the installer
+  verifies the hash before installing.
+- **Audited remote execution:** commands come from a human action confirmed in the panel
+  and are recorded in the audit log; the blast radius is bounded by running unprivileged.
 
-## Verificación manual del binario
+## Manual binary verification
 
 ```bash
-VERSION=v1.0.0
+VERSION=v1.3.0
 ARCH=amd64
 BASE=https://github.com/koyere/auranode-agent/releases/download/$VERSION
 curl -fsSLO $BASE/auranode-agent_${VERSION#v}_linux_${ARCH}.tar.gz

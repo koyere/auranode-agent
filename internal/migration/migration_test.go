@@ -16,8 +16,8 @@ import (
 	"github.com/koyere/auranode-agent/pkg/proto"
 )
 
-// relayBus conecta dos Managers (source y dest) enrutando los mensajes de datos entre
-// ellos —como hace el relay del backend— y capturando los mensajes de control.
+// relayBus connects two Managers (source and dest) routing the data messages between
+// them —as the backend relay does— and capturing the control messages.
 type relayBus struct {
 	t    *testing.T
 	src  *Manager
@@ -38,12 +38,12 @@ func (b *relayBus) route(fromSrc bool, msg any) error {
 	}
 	raw, _ := json.Marshal(m)
 	switch m.Type {
-	// Datos: reenviar al extremo opuesto.
+	// Data: forward to the opposite end.
 	case proto.TypeMigrationFile, proto.TypeMigrationChunk, proto.TypeMigrationFileDone:
 		b.dst.Handle(m.Type, raw)
 	case proto.TypeMigrationFileAck, proto.TypeMigrationWindowAck:
 		b.src.Handle(m.Type, raw)
-	// Control: capturar.
+	// Control: capture.
 	case proto.TypeMigrationReceiverReady:
 		b.prep <- m
 	case proto.TypeMigrationDone:
@@ -51,7 +51,7 @@ func (b *relayBus) route(fromSrc bool, msg any) error {
 	case proto.TypeMigrationFailed:
 		b.fail <- m
 	case proto.TypeMigrationProgress:
-		// ignorado en el test
+		// ignored in the test
 	}
 	return nil
 }
@@ -86,12 +86,12 @@ func TestMigrationRoundTrip(t *testing.T) {
 	dstDir := filepath.Join(t.TempDir(), "out")
 	stateDir := t.TempDir()
 
-	// Árbol de prueba: archivos pequeños, anidados, vacío y uno mayor que la ventana.
+	// Test tree: small files, nested, empty and one larger than the window.
 	want := map[string]string{}
 	want["a.txt"] = writeRandom(t, filepath.Join(srcDir, "a.txt"), 1234)
 	want["nested/b.bin"] = writeRandom(t, filepath.Join(srcDir, "nested", "b.bin"), 500*1024)
 	want["empty.dat"] = writeRandom(t, filepath.Join(srcDir, "empty.dat"), 0)
-	want["big.bin"] = writeRandom(t, filepath.Join(srcDir, "big.bin"), 20*1024*1024) // > ventana 8MB
+	want["big.bin"] = writeRandom(t, filepath.Join(srcDir, "big.bin"), 20*1024*1024) // > 8MB window
 
 	src := New(log, stateDir)
 	dst := New(log, stateDir)
@@ -106,7 +106,7 @@ func TestMigrationRoundTrip(t *testing.T) {
 
 	const migID = "mig_test_1"
 
-	// 1. prepare en el dest → receiver_ready.
+	// 1. prepare on the dest → receiver_ready.
 	prepRaw, _ := json.Marshal(proto.MigrationMsg{
 		Envelope: proto.Envelope{Type: proto.TypeMigrationPrepare}, MigrationID: migID, DestPath: dstDir,
 	})
@@ -119,10 +119,10 @@ func TestMigrationRoundTrip(t *testing.T) {
 		t.Fatal("timeout esperando receiver_ready")
 	}
 	if len(ready.Completed) != 0 {
-		t.Fatalf("manifest inicial debería estar vacío, got %d", len(ready.Completed))
+		t.Fatalf("initial manifest should be empty, got %d", len(ready.Completed))
 	}
 
-	// 2. start en el source.
+	// 2. start on the source.
 	startRaw, _ := json.Marshal(proto.MigrationMsg{
 		Envelope: proto.Envelope{Type: proto.TypeMigrationStart}, MigrationID: migID,
 		SourcePath: srcDir, DestPath: dstDir, ChunkSize: 1 << 20, WindowBytes: 8 << 20, VerifyChecksum: true,
@@ -135,12 +135,12 @@ func TestMigrationRoundTrip(t *testing.T) {
 			t.Fatalf("status inesperado: %s (warnings=%v)", d.Status, d.Warnings)
 		}
 	case f := <-bus.fail:
-		t.Fatalf("migración falló: %s %s", f.Code, f.Message)
+		t.Fatalf("migration failed: %s %s", f.Code, f.Message)
 	case <-time.After(30 * time.Second):
 		t.Fatal("timeout esperando done")
 	}
 
-	// 3. Verificar integridad de cada archivo en el destino.
+	// 3. Verify the integrity of each file at the destination.
 	for rel, sum := range want {
 		got := sha256File(t, filepath.Join(dstDir, rel))
 		if got != sum {
@@ -219,7 +219,7 @@ func TestMigrationResumeSkipsCompleted(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	if len(receivedFiles) != 1 || receivedFiles[0] != "y.bin" {
-		t.Fatalf("debería enviar solo y.bin (x.bin saltado), envió: %v", receivedFiles)
+		t.Fatalf("should send only y.bin (x.bin skipped), sent: %v", receivedFiles)
 	}
 	if got := sha256File(t, filepath.Join(dstDir, "y.bin")); got != bigSum {
 		t.Errorf("y.bin sha mismatch")

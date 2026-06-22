@@ -12,20 +12,20 @@ type Config struct {
 	AgentToken string // token ant_...
 	Version    string
 
-	// Defaults que el backend puede sobreescribir vía AgentConfig
+	// Defaults the backend can override via AgentConfig
 	MetricsIntervalSeconds   int
 	HeartbeatIntervalSeconds int
 	LogBufferSize            int
 	LogServices              []string
 
 	// Paths
-	DBPath string // bbolt para buffer offline
+	DBPath string // bbolt for the offline buffer
 }
 
 func Load() (*Config, error) {
 	token := env("AURANODE_TOKEN", "")
 	if token == "" {
-		return nil, errors.New("AURANODE_TOKEN es requerido")
+		return nil, errors.New("AURANODE_TOKEN is required")
 	}
 	backendURL := env("AURANODE_BACKEND_URL", "wss://api.auranode.app/ws/agent")
 

@@ -1,11 +1,11 @@
-// Package proto define los tipos de mensajes del protocolo AuraNode agent↔backend.
-// Los tipos deben estar sincronizados con backend/internal/websocket/messages.go.
+// Package proto defines the AuraNode agent↔backend protocol message types.
+// The types must stay in sync with backend/internal/websocket/messages.go.
 package proto
 
-// ─── Tipos de mensaje ─────────────────────────────────────────────────────────
+// ─── Message types ────────────────────────────────────────────────────────────
 
 const (
-	// Agente → Backend
+	// Agent → Backend
 	TypeAgentInfo       = "agent_info"
 	TypeHeartbeat       = "heartbeat"
 	TypeMetrics         = "metrics"
@@ -20,14 +20,14 @@ const (
 	TypeUpdateAvailable = "update_available"
 	TypeError           = "error"
 
-	// Backend → Agente
+	// Backend → Agent
 	TypeConfig    = "config"
 	TypeExec      = "exec"
 	TypeRuleSync  = "rule_sync"
 	TypeFSRequest = "fs_request"
 	TypeAgentPing = "ping"
 
-	// ── Port forwarding (túneles) ──────────────────────────────────────────────
+	// ── Port forwarding (tunnels) ──────────────────────────────────────────────
 	TypeTunnelStart   = "tunnel_start"
 	TypeTunnelStop    = "tunnel_stop"
 	TypeTunnelOpen    = "tunnel_open"
@@ -35,10 +35,10 @@ const (
 	TypeTunnelData    = "tunnel_data"
 	TypeTunnelClose   = "tunnel_close"
 	TypeTunnelStatus  = "tunnel_status"
-	TypeTunnelWindow  = "tunnel_window" // control de flujo por créditos (receptor→emisor)
+	TypeTunnelWindow  = "tunnel_window" // credit-based flow control (receiver→sender)
 )
 
-// ─── Operaciones del gestor de archivos (SFTP) ───────────────────────────────
+// ─── File-manager operations (SFTP) ──────────────────────────────────────────
 const (
 	FSOpList   = "list"
 	FSOpStat   = "stat"
@@ -59,7 +59,7 @@ type Envelope struct {
 	Timestamp int64  `json:"timestamp"`
 }
 
-// ─── Agente → Backend ─────────────────────────────────────────────────────────
+// ─── Agent → Backend ──────────────────────────────────────────────────────────
 
 type AgentInfo struct {
 	Envelope
@@ -76,9 +76,9 @@ type Heartbeat struct {
 	Envelope
 }
 
-// UpdateAvailable lo envía el agente cuando detecta una versión más reciente en
-// GitHub Releases. El agente NO se auto-reemplaza (modelo check-and-notify): el
-// backend lo registra para que el panel muestre que hay actualización disponible.
+// UpdateAvailable is sent by the agent when it detects a newer version on
+// GitHub Releases. The agent does NOT self-replace (check-and-notify model): the
+// backend records it so the panel can show that an update is available.
 type UpdateAvailable struct {
 	Envelope
 	CurrentVersion string `json:"current_version"`
@@ -198,7 +198,7 @@ type AgentError struct {
 	Message string `json:"message"`
 }
 
-// ─── Gestor de archivos (SFTP) ───────────────────────────────────────────────
+// ─── File manager (SFTP) ─────────────────────────────────────────────────────
 
 type FSEntry struct {
 	Name       string `json:"name"`
@@ -214,7 +214,7 @@ type FSEntry struct {
 	ModTime    int64  `json:"mod_time"`
 }
 
-// FSResponse: Agente → Backend.
+// FSResponse: Agent → Backend.
 type FSResponse struct {
 	Envelope
 	RequestID string    `json:"request_id"`
@@ -226,7 +226,7 @@ type FSResponse struct {
 	Truncated bool      `json:"truncated,omitempty"`
 }
 
-// FSRequest: Backend → Agente.
+// FSRequest: Backend → Agent.
 type FSRequest struct {
 	Envelope
 	RequestID string `json:"request_id"`
@@ -240,13 +240,13 @@ type FSRequest struct {
 	MaxBytes  int64  `json:"max_bytes,omitempty"`
 }
 
-// ─── Port forwarding (túneles) ───────────────────────────────────────────────
+// ─── Port forwarding (tunnels) ───────────────────────────────────────────────
 
 type TunnelStart struct {
 	Envelope
 	TunnelID  string `json:"tunnel_id"`
 	LocalPort int    `json:"local_port"`
-	BindAddr  string `json:"bind_addr,omitempty"` // interfaz del listener; "" = 127.0.0.1
+	BindAddr  string `json:"bind_addr,omitempty"` // listener interface; "" = 127.0.0.1
 }
 
 type TunnelStop struct {
@@ -260,8 +260,8 @@ type TunnelOpen struct {
 	StreamID string `json:"stream_id"`
 	Host     string `json:"host,omitempty"`
 	Port     int    `json:"port,omitempty"`
-	// FC indica que el source soporta control de flujo por créditos. El gating sólo
-	// se activa si AMBOS extremos lo anuncian (compat. con versiones antiguas).
+	// FC indicates the source supports credit-based flow control. Gating is only
+	// enabled if BOTH ends announce it (compatible with older versions).
 	FC bool `json:"fc,omitempty"`
 }
 
@@ -271,7 +271,7 @@ type TunnelOpenAck struct {
 	StreamID string `json:"stream_id"`
 	OK       bool   `json:"ok"`
 	Error    string `json:"error,omitempty"`
-	FC       bool   `json:"fc,omitempty"` // el dest soporta control de flujo por créditos
+	FC       bool   `json:"fc,omitempty"` // the dest supports credit-based flow control
 }
 
 type TunnelData struct {
@@ -288,10 +288,10 @@ type TunnelClose struct {
 	Error    string `json:"error,omitempty"`
 }
 
-// TunnelWindow es el control de flujo por créditos: el receptor, tras escribir
-// `bytes` en su conexión local, concede ese crédito al emisor del extremo opuesto
-// para que pueda enviar esa misma cantidad. Mantiene los bytes en vuelo por stream
-// y dirección acotados a la ventana, aplicando backpressure real (TCP) al origen.
+// TunnelWindow is the credit-based flow control: the receiver, after writing
+// `bytes` to its local connection, grants that credit to the sender on the opposite
+// end so it can send the same amount. It keeps in-flight bytes per stream and
+// direction bounded by the window, applying real (TCP) backpressure to the origin.
 type TunnelWindow struct {
 	Envelope
 	TunnelID string `json:"tunnel_id"`
@@ -306,7 +306,7 @@ type TunnelStatus struct {
 	Error    string `json:"error,omitempty"`
 }
 
-// ─── Backend → Agente ─────────────────────────────────────────────────────────
+// ─── Backend → Agent ──────────────────────────────────────────────────────────
 
 type RuleDefinition struct {
 	RuleID                   string  `json:"rule_id"`
@@ -347,51 +347,51 @@ type RuleSync struct {
 	Rules []RuleDefinition `json:"rules"`
 }
 
-// ─── Migraciones entre VPS (Tipo B: directorio, modo relay) ──────────────────
+// ─── VPS-to-VPS migrations (Type B: directory, relay mode) ───────────────────
 //
-// Plano de control (agente ↔ backend) y plano de datos (source ↔ dest, que el
-// backend reenvía opaco por migration_id). Todos los mensajes comparten el
-// struct paraguas MigrationMsg (campos opcionales según el tipo); es un protocolo
-// de relay con muchos tipos de mensaje y un struct por tipo añadiría mucho ruido.
+// Control plane (agent ↔ backend) and data plane (source ↔ dest, which the
+// backend forwards opaquely by migration_id). All messages share the umbrella
+// MigrationMsg struct (optional fields depending on the type); it is a relay
+// protocol with many message types and one struct per type would add a lot of noise.
 const (
 	// Control (Backend → agente)
-	TypeMigrationEstimateReq = "migration_estimate_req" // backend→source: estima tamaño
-	TypeMigrationPrepare     = "migration_prepare"      // backend→dest: prepárate a recibir
-	TypeMigrationStart       = "migration_start"        // backend→source: empieza a transferir
-	TypeMigrationCancel      = "migration_cancel"       // backend→ambos: aborta
+	TypeMigrationEstimateReq = "migration_estimate_req" // backend→source: estimate size
+	TypeMigrationPrepare     = "migration_prepare"      // backend→dest: get ready to receive
+	TypeMigrationStart       = "migration_start"        // backend→source: start transferring
+	TypeMigrationCancel      = "migration_cancel"       // backend→both: abort
 
-	// Control (agente → Backend)
-	TypeMigrationEstimateRes   = "migration_estimate_res"   // source→backend: tamaño estimado
-	TypeMigrationReceiverReady = "migration_receiver_ready" // dest→backend: listo + espacio + manifest
-	TypeMigrationProgress      = "migration_progress"       // source→backend: progreso (cada ~5s)
-	TypeMigrationDone          = "migration_done"           // source→backend: transferencia terminada
+	// Control (agent → backend)
+	TypeMigrationEstimateRes   = "migration_estimate_res"   // source→backend: estimated size
+	TypeMigrationReceiverReady = "migration_receiver_ready" // dest→backend: ready + free space + manifest
+	TypeMigrationProgress      = "migration_progress"       // source→backend: progress (every ~5s)
+	TypeMigrationDone          = "migration_done"           // source→backend: transfer finished
 	TypeMigrationFailed        = "migration_failed"         // source/dest→backend: error
 
-	// Datos (source ↔ dest, RELAY por el backend)
-	TypeMigrationFile      = "migration_file"       // source→dest: cabecera de archivo
+	// Data (source ↔ dest, RELAYED by the backend)
+	TypeMigrationFile      = "migration_file"       // source→dest: file header
 	TypeMigrationChunk     = "migration_chunk"      // source→dest: chunk (base64 + crc32)
-	TypeMigrationFileDone  = "migration_file_done"  // source→dest: fin de archivo
-	TypeMigrationFileAck   = "migration_file_ack"   // dest→source: verificación del archivo
-	TypeMigrationWindowAck = "migration_window_ack" // dest→source: control de flujo (bytes escritos)
+	TypeMigrationFileDone  = "migration_file_done"  // source→dest: end of file
+	TypeMigrationFileAck   = "migration_file_ack"   // dest→source: file verification
+	TypeMigrationWindowAck = "migration_window_ack" // dest→source: flow control (bytes written)
 )
 
-// MigrationFileInfo describe un archivo (cabecera o entrada del manifest de reanudación).
+// MigrationFileInfo describes a file (header or resume-manifest entry).
 type MigrationFileInfo struct {
 	Path   string `json:"path"`             // ruta relativa a source_path/dest_path
 	Size   int64  `json:"size"`             // bytes
-	Mode   uint32 `json:"mode,omitempty"`   // permisos unix
+	Mode   uint32 `json:"mode,omitempty"`   // unix permissions
 	Mtime  int64  `json:"mtime,omitempty"`  // epoch segundos
 	Sha256 string `json:"sha256,omitempty"` // hex; presente al completarse
 }
 
-// MigrationWarning es un aviso del reporte final (archivo cambiado/desaparecido, etc.).
+// MigrationWarning is a notice in the final report (file changed/disappeared, etc.).
 type MigrationWarning struct {
 	Code    string `json:"code"`
 	File    string `json:"file,omitempty"`
 	Message string `json:"message"`
 }
 
-// MigrationMsg es el sobre común de todos los mensajes de migración.
+// MigrationMsg is the common envelope for all migration messages.
 type MigrationMsg struct {
 	Envelope
 	MigrationID string `json:"migration_id"`
@@ -403,12 +403,16 @@ type MigrationMsg struct {
 	ChunkSize      int      `json:"chunk_size,omitempty"`
 	WindowBytes    int64    `json:"window_bytes,omitempty"`
 	VerifyChecksum bool     `json:"verify_checksum,omitempty"`
+	// Delta (continuous sync, Type C): in prepare it makes the dest scan the files
+	// already present under dest_path and return them in the manifest; the source then
+	// skips those matching on size+mtime (only transfers changed/new files).
+	Delta bool `json:"delta,omitempty"`
 
 	// estimate_res / receiver_ready / progress
 	TotalBytes     int64               `json:"total_bytes,omitempty"`
 	TotalFiles     int                 `json:"total_files,omitempty"`
 	AvailableBytes int64               `json:"available_bytes,omitempty"`
-	Completed      []MigrationFileInfo `json:"completed,omitempty"` // manifest de reanudación
+	Completed      []MigrationFileInfo `json:"completed,omitempty"` // resume manifest
 
 	// progress
 	BytesTransferred int64  `json:"bytes_transferred,omitempty"`

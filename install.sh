@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# AuraNode Agent — Instalador oficial
-# Repositorio: https://github.com/koyere/auranode-agent
-# Documentación: https://docs.auranode.app/agent/install
+# AuraNode Agent — official installer
+# Repository:    https://github.com/koyere/auranode-agent
+# Documentation: https://docs.auranode.app/agent/install
 #
-# Uso:
+# Usage:
 #   curl -fsSL https://get.auranode.app/agent | AURANODE_TOKEN=ant_xxx sudo -E bash
 #
-# El binario se verifica con SHA256 contra checksums.txt del release en GitHub.
+# The binary is verified with SHA256 against the release's checksums.txt on GitHub.
 
 set -euo pipefail
 
-# ─── Configuración ─────────────────────────────────────────────────────────────
+# ─── Configuration ─────────────────────────────────────────────────────────────
 GITHUB_REPO="koyere/auranode-agent"
 PROJECT="auranode-agent"
 INSTALL_DIR="/usr/local/bin"
@@ -29,73 +29,73 @@ info()  { echo -e "${GREEN}[auranode]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[auranode]${NC} $*"; }
 error() { echo -e "${RED}[auranode] ERROR:${NC} $*" >&2; exit 1; }
 
-# ─── Verificaciones previas ────────────────────────────────────────────────────
-[[ "${EUID}" -ne 0 ]] && error "Este script debe ejecutarse como root (usa sudo)."
+# ─── Pre-flight checks ─────────────────────────────────────────────────────────
+[[ "${EUID}" -ne 0 ]] && error "This script must be run as root (use sudo)."
 
 for cmd in curl tar sha256sum systemctl; do
-  command -v "$cmd" >/dev/null 2>&1 || error "Comando requerido no encontrado: $cmd"
+  command -v "$cmd" >/dev/null 2>&1 || error "Required command not found: $cmd"
 done
 
 TOKEN="${AURANODE_TOKEN:-}"
-[[ -z "$TOKEN" ]] && error "AURANODE_TOKEN no está definido. Obtén tu token en https://panel.auranode.app"
+[[ -z "$TOKEN" ]] && error "AURANODE_TOKEN is not set. Get your token at https://panel.auranode.app"
 if ! echo "$TOKEN" | grep -qE '^ant_[A-Za-z0-9_-]{32,}$'; then
-  error "Formato de token inválido. Verifica el token en tu panel de AuraNode."
+  error "Invalid token format. Check the token in your AuraNode panel."
 fi
 
-# ─── Detección de arquitectura ─────────────────────────────────────────────────
+# ─── Architecture detection ────────────────────────────────────────────────────
 case "$(uname -m)" in
   x86_64)        ARCH="amd64" ;;
   aarch64|arm64) ARCH="arm64" ;;
   armv7l)        ARCH="armv7" ;;
-  *)             error "Arquitectura no soportada: $(uname -m)" ;;
+  *)             error "Unsupported architecture: $(uname -m)" ;;
 esac
 
-# ─── Resolver versión ──────────────────────────────────────────────────────────
+# ─── Resolve version ───────────────────────────────────────────────────────────
 if [[ "$AGENT_VERSION" == "latest" ]]; then
-  info "Consultando última versión disponible..."
+  info "Looking up the latest available version..."
   AGENT_VERSION=$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" \
     | grep '"tag_name"' | sed -E 's/.*"(v[^"]+)".*/\1/')
-  [[ -z "$AGENT_VERSION" ]] && error "No se pudo determinar la última versión. ¿Existe ya un release publicado?"
+  [[ -z "$AGENT_VERSION" ]] && error "Could not determine the latest version. Is there a published release yet?"
 fi
 VERSION_NO_V="${AGENT_VERSION#v}"
-info "Versión a instalar: ${AGENT_VERSION} (linux/${ARCH})"
+info "Version to install: ${AGENT_VERSION} (linux/${ARCH})"
 
-# ─── Descarga y verificación ───────────────────────────────────────────────────
+# ─── Download and verify ───────────────────────────────────────────────────────
 BASE_URL="https://github.com/${GITHUB_REPO}/releases/download/${AGENT_VERSION}"
 TARBALL="${PROJECT}_${VERSION_NO_V}_linux_${ARCH}.tar.gz"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-info "Descargando ${TARBALL}..."
+info "Downloading ${TARBALL}..."
 curl -fsSL "${BASE_URL}/${TARBALL}"       -o "${TMP_DIR}/${TARBALL}" \
-  || error "No se pudo descargar el binario: ${BASE_URL}/${TARBALL}"
+  || error "Could not download the binary: ${BASE_URL}/${TARBALL}"
 curl -fsSL "${BASE_URL}/checksums.txt"    -o "${TMP_DIR}/checksums.txt" \
-  || error "No se pudo descargar checksums.txt"
+  || error "Could not download checksums.txt"
 
-info "Verificando integridad (SHA256)..."
+info "Verifying integrity (SHA256)..."
 EXPECTED=$(grep " ${TARBALL}\$" "${TMP_DIR}/checksums.txt" | awk '{print $1}')
 ACTUAL=$(sha256sum "${TMP_DIR}/${TARBALL}" | awk '{print $1}')
-[[ -z "$EXPECTED" ]] && error "No se encontró el checksum de ${TARBALL} en checksums.txt"
-[[ "$EXPECTED" != "$ACTUAL" ]] && error "Verificación SHA256 FALLIDA. El archivo puede estar corrupto o comprometido."
-info "✓ SHA256 verificado"
+[[ -z "$EXPECTED" ]] && error "Could not find the checksum for ${TARBALL} in checksums.txt"
+[[ "$EXPECTED" != "$ACTUAL" ]] && error "SHA256 verification FAILED. The file may be corrupt or tampered with."
+info "✓ SHA256 verified"
 
 tar -xzf "${TMP_DIR}/${TARBALL}" -C "${TMP_DIR}"
-[[ -f "${TMP_DIR}/${BINARY_NAME}" ]] || error "El binario no se encontró dentro del archivo."
+[[ -f "${TMP_DIR}/${BINARY_NAME}" ]] || error "The binary was not found inside the archive."
 
-# ─── Usuario del sistema y directorios ─────────────────────────────────────────
+# ─── System user and directories ───────────────────────────────────────────────
 if ! id -u "$SERVICE_USER" &>/dev/null; then
-  info "Creando usuario del sistema: ${SERVICE_USER}..."
+  info "Creating system user: ${SERVICE_USER}..."
   useradd --system --no-create-home --shell /usr/sbin/nologin "$SERVICE_USER"
 fi
 mkdir -p "$CONFIG_DIR" "$DATA_DIR" "$LOG_DIR"
 chown "${SERVICE_USER}:${SERVICE_USER}" "$DATA_DIR" "$LOG_DIR"
 chmod 750 "$CONFIG_DIR"
 
-# ─── Instalar binario ──────────────────────────────────────────────────────────
+# ─── Install binary ────────────────────────────────────────────────────────────
 install -m 755 -o root -g root "${TMP_DIR}/${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}"
-info "Binario instalado en ${INSTALL_DIR}/${BINARY_NAME}"
+info "Binary installed at ${INSTALL_DIR}/${BINARY_NAME}"
 
-# ─── Archivo de entorno (token protegido) ──────────────────────────────────────
+# ─── Environment file (protected token) ────────────────────────────────────────
 cat > "$ENV_FILE" <<EOF
 AURANODE_TOKEN=${TOKEN}
 AURANODE_BACKEND_URL=${BACKEND_URL}
@@ -104,7 +104,7 @@ EOF
 chmod 600 "$ENV_FILE"
 chown "root:${SERVICE_USER}" "$ENV_FILE"
 
-# ─── Servicio systemd ──────────────────────────────────────────────────────────
+# ─── systemd service ───────────────────────────────────────────────────────────
 cat > "/etc/systemd/system/${SERVICE_NAME}.service" <<EOF
 [Unit]
 Description=AuraNode Agent
@@ -133,7 +133,7 @@ ProtectHome=yes
 CapabilityBoundingSet=
 AmbientCapabilities=
 
-# Recursos
+# Resources
 MemoryMax=256M
 CPUQuota=20%
 
@@ -150,8 +150,8 @@ systemctl enable --now "$SERVICE_NAME"
 
 echo ""
 info "═══════════════════════════════════════════════"
-info "✓ Instalación completada — ${AGENT_VERSION}"
-info "  Estado: systemctl status ${SERVICE_NAME}"
+info "✓ Installation complete — ${AGENT_VERSION}"
+info "  Status: systemctl status ${SERVICE_NAME}"
 info "  Logs:   journalctl -u ${SERVICE_NAME} -f"
 info "═══════════════════════════════════════════════"
-info "El servidor debería aparecer en tu panel en unos segundos."
+info "The server should appear in your panel within a few seconds."

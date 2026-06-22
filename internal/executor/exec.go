@@ -1,4 +1,4 @@
-// Package executor ejecuta comandos recibidos desde el backend y reporta el resultado.
+// Package executor runs commands received from the backend and reports the result.
 package executor
 
 import (
@@ -17,7 +17,7 @@ type Result struct {
 	DurationMS int64
 }
 
-// Run ejecuta el comando con un timeout hard y devuelve el resultado.
+// Run runs the command with a hard timeout and returns the result.
 // Si hardTimeout == 0, usa 300 s como fallback.
 func Run(ctx context.Context, commandID, command string, hardTimeout int) Result {
 	if hardTimeout <= 0 {
@@ -29,7 +29,7 @@ func Run(ctx context.Context, commandID, command string, hardTimeout int) Result
 
 	start := time.Now()
 
-	// Ejecutar con bash -c para soportar pipes, redirects, etc.
+	// Run with bash -c to support pipes, redirects, etc.
 	cmd := exec.CommandContext(ctx, "bash", "-c", command)
 
 	var stdout, stderr bytes.Buffer

@@ -1,4 +1,4 @@
-// Package agent orquesta el ciclo de vida completo del agente AuraNode.
+// Package agent orchestrates the full lifecycle of the AuraNode agent.
 package agent
 
 import (
@@ -23,7 +23,7 @@ import (
 	"github.com/koyere/auranode-agent/pkg/proto"
 )
 
-// Agent es la raíz del proceso.
+// Agent is the root of the process.
 type Agent struct {
 	cfg        *agentcfg.Config
 	log        *zap.Logger
@@ -42,9 +42,9 @@ type Agent struct {
 }
 
 func New(cfg *agentcfg.Config, log *zap.Logger) (*Agent, error) {
-	// Abrir buffer offline (crea directorio si hace falta)
+	// Open the offline buffer (creates the directory if needed)
 	if err := os.MkdirAll(dirOf(cfg.DBPath), 0755); err != nil {
-		log.Warn("buffer: no se pudo crear directorio, usando /tmp",
+		log.Warn("buffer: could not create directory, using /tmp",
 			zap.String("path", cfg.DBPath),
 			zap.Error(err),
 		)
@@ -53,7 +53,7 @@ func New(cfg *agentcfg.Config, log *zap.Logger) (*Agent, error) {
 
 	buf, err := buffer.Open(cfg.DBPath, log)
 	if err != nil {
-		log.Warn("buffer: no se pudo abrir bbolt, modo sin buffer",
+		log.Warn("buffer: could not open bbolt, running without buffer",
 			zap.String("path", cfg.DBPath),
 			zap.Error(err),
 		)
@@ -81,7 +81,7 @@ func New(cfg *agentcfg.Config, log *zap.Logger) (*Agent, error) {
 	a.tunnels = tunnel.New(log)
 	a.migrations = migration.New(log, dirOf(cfg.DBPath))
 
-	// Updater check-and-notify: avisa al backend cuando hay versión más reciente.
+	// Updater check-and-notify: tells the backend when a newer version is available.
 	a.updater = updater.New(cfg.Version, log, func(current, latest string) {
 		a.sendUpdateAvailable(current, latest)
 	})
@@ -95,8 +95,8 @@ func (a *Agent) Run(ctx context.Context) {
 	a.ws.Run(ctx)
 }
 
-// sendUpdateAvailable notifica al backend que hay una versión más reciente (si
-// hay conexión activa; si no, se reenvía en el próximo OnConnect).
+// sendUpdateAvailable notifies the backend that a newer version is available (if
+// there is an active connection; otherwise it is re-sent on the next OnConnect).
 func (a *Agent) sendUpdateAvailable(current, latest string) {
 	a.mu.Lock()
 	fn := a.sendFn
@@ -120,14 +120,14 @@ func (a *Agent) OnConnect(ctx context.Context, sendFn func(any) error) {
 	a.tunnels.SetSend(sendFn)
 	a.migrations.SetSend(sendFn)
 
-	// 1. Enviar agent_info
+	// 1. Send agent_info
 	info := a.collector.SystemInfo(a.cfg.Version)
 	if err := sendFn(info); err != nil {
 		a.log.Warn("handshake: error enviando agent_info", zap.Error(err))
 		return
 	}
 
-	// 1b. Si ya se detectó una versión más reciente, reavisar al backend.
+	// 1b. If a newer version was already detected, notify the backend again.
 	if latest := a.updater.LatestKnown(); latest != "" {
 		sendFn(proto.UpdateAvailable{ //nolint:errcheck
 			Envelope:       proto.Envelope{Type: proto.TypeUpdateAvailable, Timestamp: time.Now().Unix()},
@@ -136,10 +136,10 @@ func (a *Agent) OnConnect(ctx context.Context, sendFn func(any) error) {
 		})
 	}
 
-	// 2. Vaciar buffer offline si hay entradas
+	// 2. Flush the offline buffer if there are entries
 	go a.drainBuffer(ctx, sendFn)
 
-	// 3. Iniciar loops de métricas y heartbeat
+	// 3. Start the metrics and heartbeat loops
 	go a.metricsLoop(ctx, sendFn)
 	go a.heartbeatLoop(ctx, sendFn)
 }
@@ -148,10 +148,10 @@ func (a *Agent) OnDisconnect() {
 	a.mu.Lock()
 	a.sendFn = nil
 	a.mu.Unlock()
-	// Sin conexión al backend los túneles no pueden relayar: cerrar todo.
+	// Without a backend connection tunnels cannot relay: close everything.
 	a.tunnels.SetSend(nil)
 	a.tunnels.Shutdown()
-	// Las migraciones tampoco pueden continuar sin backend; quedarán INTERRUPTED.
+	// Migrations also cannot continue without the backend; they will be left INTERRUPTED.
 	a.migrations.SetSend(nil)
 	a.migrations.Shutdown()
 	a.log.Info("agent: desconectado del backend")
@@ -220,7 +220,7 @@ func (a *Agent) OnExec(cmd proto.ExecCommand) {
 	if cmd.Async {
 		go run()
 	} else {
-		go run() // siempre goroutine para no bloquear el reader
+		go run() // always a goroutine so the reader is not blocked
 	}
 }
 
@@ -230,14 +230,14 @@ func (a *Agent) OnRuleSync(rs proto.RuleSync) {
 }
 
 func (a *Agent) OnFS(req proto.FSRequest) {
-	a.log.Info("fs: petición recibida",
+	a.log.Info("fs: request received",
 		zap.String("id", req.RequestID),
 		zap.String("op", req.Op),
 		zap.String("path", req.Path),
 	)
 
-	// Ejecutar en goroutine para no bloquear el reader; las operaciones de I/O
-	// pueden tardar (directorios grandes, lecturas de varios MB).
+	// Run in a goroutine so the reader is not blocked; the I/O operations
+	// can take a while (large directories, multi-MB reads).
 	go func() {
 		resp := agentfs.Handle(req)
 		resp.Envelope = proto.Envelope{Type: proto.TypeFSResponse, Timestamp: time.Now().Unix()}
@@ -251,7 +251,7 @@ func (a *Agent) OnFS(req proto.FSRequest) {
 	}()
 }
 
-// ─── Port forwarding (túneles) ─────────────────────────────────────────────────
+// ─── Port forwarding (tunnels) ─────────────────────────────────────────────────
 
 func (a *Agent) OnTunnelStart(msg proto.TunnelStart) {
 	a.log.Info("tunnel: start",
@@ -266,16 +266,16 @@ func (a *Agent) OnTunnelStop(msg proto.TunnelStop) {
 }
 
 func (a *Agent) OnTunnelOpen(msg proto.TunnelOpen) {
-	// Rol dest: el backend pide abrir la conexión hacia el servicio destino.
+	// Dest role: the backend requests opening the connection to the target service.
 	a.log.Debug("tunnel: open recibido (dest)", zap.String("stream_id", msg.StreamID),
 		zap.String("host", msg.Host), zap.Int("port", msg.Port))
 	a.tunnels.OpenDest(msg.TunnelID, msg.StreamID, msg.Host, msg.Port, msg.FC)
 }
 
 func (a *Agent) OnTunnelOpenAck(msg proto.TunnelOpenAck) {
-	// Rol source: resultado del dial en el destino.
+	// Source role: result of the dial at the destination.
 	if !msg.OK {
-		a.log.Warn("tunnel: dial destino rechazado",
+		a.log.Warn("tunnel: dial to target rejected",
 			zap.String("stream_id", msg.StreamID), zap.String("error", msg.Error))
 	}
 	a.tunnels.Ack(msg.StreamID, msg.OK, msg.FC)
@@ -318,7 +318,7 @@ func (a *Agent) metricsLoop(ctx context.Context, sendFn func(any) error) {
 		case <-ticker.C:
 		}
 
-		// Re-leer el intervalo por si cambió con OnConfig
+		// Re-read the interval in case it changed via OnConfig
 		a.mu.Lock()
 		newInterval := a.metricsInterval
 		a.mu.Unlock()
@@ -329,10 +329,10 @@ func (a *Agent) metricsLoop(ctx context.Context, sendFn func(any) error) {
 
 		m := a.collector.Collect()
 
-		// Evaluar reglas
+		// Evaluate rules
 		go a.engine.Evaluate(ctx, m)
 
-		// Intentar enviar; si falla, guardar en buffer
+		// Try to send; if it fails, store in the buffer
 		if err := sendFn(m); err != nil {
 			if a.buf != nil {
 				a.buf.Push(m)
@@ -380,14 +380,14 @@ func (a *Agent) drainBuffer(ctx context.Context, sendFn func(any) error) {
 		return
 	}
 
-	a.log.Info("buffer: vaciando métricas offline", zap.Int("count", count))
+	a.log.Info("buffer: flushing offline metrics", zap.Int("count", count))
 
 	entries := a.buf.Drain()
 	if len(entries) == 0 {
 		return
 	}
 
-	// Enviar como batch
+	// Send as a batch
 	batch := proto.MetricsBatch{
 		Envelope: proto.Envelope{Type: proto.TypeMetricsBatch, Timestamp: time.Now().Unix()},
 		Count:    len(entries),
@@ -396,7 +396,7 @@ func (a *Agent) drainBuffer(ctx context.Context, sendFn func(any) error) {
 
 	if err := sendFn(batch); err != nil {
 		a.log.Warn("buffer: error enviando batch offline", zap.Error(err))
-		// Guardar de vuelta
+		// Store back
 		for _, m := range entries {
 			a.buf.Push(m)
 		}

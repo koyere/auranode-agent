@@ -14,7 +14,7 @@ func TestIsNewer(t *testing.T) {
 		{"1.2.0", "1.1.9", false},
 		{"2.0.0", "1.9.9", false},
 		{"v1.0.0", "v1.0.1", true},
-		{"1.0.0", "1.0.1-beta.1", true}, // se ignora el pre-release: 1.0.1 > 1.0.0
+		{"1.0.0", "1.0.1-beta.1", true}, // pre-release is ignored: 1.0.1 > 1.0.0
 		{"1.0.0-beta", "1.0.0", false},  // misma triada 1.0.0
 		{"1.0.0", "1.1.0-rc.1", true},   // minor mayor aunque sea rc
 	}

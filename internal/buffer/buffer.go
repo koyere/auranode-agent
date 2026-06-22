@@ -1,4 +1,4 @@
-// Package buffer persiste métricas offline con bbolt para enviarlas al reconectar.
+// Package buffer persists metrics offline with bbolt to send them on reconnect.
 package buffer
 
 import (
@@ -39,7 +39,7 @@ func Open(path string, log *zap.Logger) (*Buffer, error) {
 
 func (b *Buffer) Close() { b.db.Close() }
 
-// Push guarda una métrica en el buffer. Si supera maxEntries, descarta la más antigua.
+// Push stores a metric in the buffer. If it exceeds maxEntries, the oldest is dropped.
 func (b *Buffer) Push(m proto.Metrics) {
 	data, err := json.Marshal(m)
 	if err != nil {
@@ -50,7 +50,7 @@ func (b *Buffer) Push(m proto.Metrics) {
 		seq, _ := bkt.NextSequence()
 		key := itob(seq)
 
-		// Límite de tamaño: eliminar la más vieja si excede
+		// Size limit: drop the oldest if it exceeds the cap
 		for bkt.Stats().KeyN >= maxEntries {
 			cur := bkt.Cursor()
 			k, _ := cur.First()
@@ -63,7 +63,7 @@ func (b *Buffer) Push(m proto.Metrics) {
 	})
 }
 
-// Drain devuelve todas las métricas almacenadas y las elimina.
+// Drain returns all stored metrics and removes them.
 func (b *Buffer) Drain() []proto.Metrics {
 	var out []proto.Metrics
 	b.db.Update(func(tx *bolt.Tx) error { //nolint:errcheck
@@ -75,7 +75,7 @@ func (b *Buffer) Drain() []proto.Metrics {
 			}
 			return nil
 		})
-		// Borrar todo el bucket y recrearlo
+		// Delete the whole bucket and recreate it
 		tx.DeleteBucket([]byte(bucketMetrics))    //nolint:errcheck
 		tx.CreateBucket([]byte(bucketMetrics))     //nolint:errcheck
 		return nil
@@ -83,7 +83,7 @@ func (b *Buffer) Drain() []proto.Metrics {
 	return out
 }
 
-// Count retorna cuántas métricas hay en el buffer.
+// Count returns how many metrics are in the buffer.
 func (b *Buffer) Count() int {
 	var n int
 	b.db.View(func(tx *bolt.Tx) error { //nolint:errcheck

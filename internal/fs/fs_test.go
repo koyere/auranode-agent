@@ -26,7 +26,7 @@ func TestLifecycle(t *testing.T) {
 		t.Fatalf("mkdir: %s", r.Error)
 	}
 	if fi, err := os.Stat(sub); err != nil || !fi.IsDir() {
-		t.Fatalf("mkdir no creó el directorio: %v", err)
+		t.Fatalf("mkdir did not create the directory: %v", err)
 	}
 
 	// write
@@ -43,7 +43,7 @@ func TestLifecycle(t *testing.T) {
 	}
 	got, _ := base64.StdEncoding.DecodeString(r.Content)
 	if string(got) != "hola mundo" {
-		t.Fatalf("read content = %q, quería 'hola mundo'", got)
+		t.Fatalf("read content = %q, wanted 'hola mundo'", got)
 	}
 
 	// stat
@@ -66,7 +66,7 @@ func TestLifecycle(t *testing.T) {
 		t.Fatalf("chmod: %s", r.Error)
 	}
 	if fi, _ := os.Stat(file); fi.Mode().Perm() != 0600 {
-		t.Fatalf("chmod no aplicó 0600")
+		t.Fatalf("chmod did not apply 0600")
 	}
 
 	// rename
@@ -75,7 +75,7 @@ func TestLifecycle(t *testing.T) {
 		t.Fatalf("rename: %s", r.Error)
 	}
 	if _, err := os.Stat(moved); err != nil {
-		t.Fatalf("rename no movió el archivo: %v", err)
+		t.Fatalf("rename did not move the file: %v", err)
 	}
 
 	// delete
@@ -83,13 +83,13 @@ func TestLifecycle(t *testing.T) {
 		t.Fatalf("delete: %s", r.Error)
 	}
 	if _, err := os.Stat(sub); !os.IsNotExist(err) {
-		t.Fatalf("delete no eliminó el directorio")
+		t.Fatalf("delete did not remove the directory")
 	}
 }
 
 func TestRejectsRelativePath(t *testing.T) {
 	if r := do(proto.FSOpStat, "etc/passwd", nil); r.OK || r.Error == "" {
-		t.Fatalf("debió rechazar ruta relativa, got OK=%v", r.OK)
+		t.Fatalf("should have rejected a relative path, got OK=%v", r.OK)
 	}
 }
 
@@ -115,6 +115,6 @@ func TestReadTruncation(t *testing.T) {
 func TestReadDirFails(t *testing.T) {
 	dir := t.TempDir()
 	if r := do(proto.FSOpRead, dir, nil); r.OK {
-		t.Fatalf("read de un directorio debió fallar")
+		t.Fatalf("reading a directory should have failed")
 	}
 }

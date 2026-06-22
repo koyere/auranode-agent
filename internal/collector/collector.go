@@ -26,7 +26,7 @@ func New(log *zap.Logger) *Collector {
 	return &Collector{log: log, prevNet: make(map[string]net.IOCountersStat)}
 }
 
-// SystemInfo recoge información estática del sistema (se envía una vez al conectar).
+// SystemInfo gathers static system information (sent once on connect).
 func (c *Collector) SystemInfo(version string) proto.AgentInfo {
 	info := proto.AgentInfo{
 		Envelope: proto.Envelope{
@@ -54,7 +54,7 @@ func (c *Collector) SystemInfo(version string) proto.AgentInfo {
 	return info
 }
 
-// Collect recoge todas las métricas del sistema en un snapshot.
+// Collect gathers all system metrics into a snapshot.
 func (c *Collector) Collect() proto.Metrics {
 	now := time.Now()
 	m := proto.Metrics{
@@ -102,7 +102,7 @@ func (c *Collector) Collect() proto.Metrics {
 		}
 	}
 
-	// Network (delta desde última lectura)
+	// Network (delta since last read)
 	if counters, err := net.IOCounters(true); err == nil {
 		elapsed := now.Sub(c.prevNetTime).Seconds()
 		if elapsed <= 0 {
@@ -134,7 +134,7 @@ func (c *Collector) Collect() proto.Metrics {
 		m.LoadAvg = proto.LoadAvg{M1: avg.Load1, M5: avg.Load5, M15: avg.Load15}
 	}
 
-	// Top 10 procesos por CPU
+	// Top 10 processes by CPU
 	if procs, err := process.Processes(); err == nil {
 		type entry struct {
 			pid  int32
@@ -153,7 +153,7 @@ func (c *Collector) Collect() proto.Metrics {
 			}
 			entries = append(entries, entry{p.Pid, name, cpuPct, ramMB})
 		}
-		// Ordenar por CPU desc (insertion sort para 10 elementos)
+		// Sort by CPU desc (insertion sort for 10 elements)
 		for i := 0; i < len(entries) && i < 10; i++ {
 			max := i
 			for j := i + 1; j < len(entries); j++ {

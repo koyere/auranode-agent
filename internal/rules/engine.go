@@ -1,4 +1,4 @@
-// Package rules evalúa reglas de auto-remediación sobre métricas en tiempo real.
+// Package rules evaluates auto-remediation rules over real-time metrics.
 package rules
 
 import (
@@ -21,10 +21,10 @@ type Engine struct {
 }
 
 type ruleState struct {
-	conditionSince time.Time // cuándo empezó a cumplirse la condición
+	conditionSince time.Time // when the condition started being met
 	lastFired      time.Time
 	firedToday     int
-	lastFiredDay   int // día del año
+	lastFiredDay   int // day of the year
 }
 
 func New(sendFn func(proto.RuleFired), log *zap.Logger) *Engine {
@@ -35,14 +35,14 @@ func New(sendFn func(proto.RuleFired), log *zap.Logger) *Engine {
 	}
 }
 
-// Sync reemplaza las reglas activas.
+// Sync replaces the active rules.
 func (e *Engine) Sync(rules []proto.RuleDefinition) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.rules = rules
 }
 
-// Evaluate evalúa las reglas contra el snapshot de métricas recibido.
+// Evaluate evaluates the rules against the received metrics snapshot.
 func (e *Engine) Evaluate(ctx context.Context, m proto.Metrics) {
 	e.mu.Lock()
 	rules := make([]proto.RuleDefinition, len(e.rules))
@@ -80,7 +80,7 @@ func (e *Engine) Evaluate(ctx context.Context, m proto.Metrics) {
 			continue
 		}
 
-		// Verificar duración de la condición
+		// Check the condition duration
 		condDuration := now.Sub(st.conditionSince)
 		minDuration := time.Duration(r.ConditionDurationSeconds) * time.Second
 		if condDuration < minDuration {
@@ -94,7 +94,7 @@ func (e *Engine) Evaluate(ctx context.Context, m proto.Metrics) {
 			continue
 		}
 
-		// Max por día
+		// Max per day
 		todayYearDay := now.YearDay()
 		if r.MaxPerDay > 0 {
 			if st.lastFiredDay != todayYearDay {
@@ -109,10 +109,10 @@ func (e *Engine) Evaluate(ctx context.Context, m proto.Metrics) {
 
 		st.lastFired = now
 		st.firedToday++
-		st.conditionSince = time.Time{} // reset para no refired inmediatamente
+		st.conditionSince = time.Time{} // reset so it does not refire immediately
 		e.mu.Unlock()
 
-		// Ejecutar acción de forma asíncrona
+		// Run the action asynchronously
 		go e.fire(ctx, r, value)
 	}
 }
@@ -151,7 +151,7 @@ func (e *Engine) fire(ctx context.Context, r proto.RuleDefinition, triggerValue 
 	})
 }
 
-// extractMetric extrae el valor numérico de la métrica indicada.
+// extractMetric extracts the numeric value of the given metric.
 func extractMetric(m proto.Metrics, name string) (float64, bool) {
 	switch name {
 	case "cpu":

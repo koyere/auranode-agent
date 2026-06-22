@@ -12,7 +12,7 @@ import (
 	"github.com/koyere/auranode-agent/internal/config"
 )
 
-// Sobreescritos en build con -ldflags por GoReleaser.
+// Overwritten at build time with -ldflags by GoReleaser.
 var (
 	version = "dev"
 	commit  = "none"
@@ -25,7 +25,7 @@ func main() {
 
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatal("config inválida", zap.Error(err))
+		log.Fatal("invalid config", zap.Error(err))
 	}
 	cfg.Version = version
 

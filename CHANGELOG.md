@@ -1,51 +1,59 @@
 # Changelog
 
-Todas las versiones notables del agente de AuraNode se documentan aquí.
-El formato sigue [Keep a Changelog](https://keepachangelog.com/) y
-[SemVer](https://semver.org/lang/es/).
+All notable versions of the AuraNode agent are documented here.
+The format follows [Keep a Changelog](https://keepachangelog.com/) and
+[SemVer](https://semver.org/).
+
+## [1.3.0] — 2026-06-22
+
+### Added
+- **Delta continuous sync (migrations Type C):** when the backend requests a sync,
+  the destination agent scans the files already present under the target path and
+  reports them in its manifest, so the source only transfers new or changed files
+  (compared by size + mtime). Fully backward compatible: older agents ignore the flag
+  and perform a full transfer.
 
 ## [1.2.1] — 2026-06-20
 
-### Corregido
-- **Deadlock de half-close en túneles:** al cerrarse una dirección del stream (p.ej.
-  fin de la petición mientras la respuesta sigue fluyendo), el stream se eliminaba del
-  mapa y los créditos (`tunnel_window`) de la dirección aún activa se perdían → el
-  lector se quedaba sin crédito y la conexión se colgaba. Ahora el cierre sólo afecta a
-  su dirección (half-close real) y el stream se elimina cuando ambas terminan.
+### Fixed
+- **Tunnel half-close deadlock:** when one direction of a stream closed (e.g. the
+  request finished while the response was still flowing), the stream was removed from
+  the map and the credits (`tunnel_window`) of the still-active direction were lost →
+  the reader ran out of credit and the connection hung. Closing now only affects its
+  own direction (true half-close) and the stream is removed when both directions end.
 
 ## [1.2.0] — 2026-06-20
 
-### Añadido / Mejorado
-- **Control de flujo por créditos en los túneles** (port forwarding): cada dirección
-  de cada stream tiene una ventana de bytes en vuelo; el receptor concede crédito
-  (`tunnel_window`) al drenar y el emisor deja de leer su TCP local cuando se agota,
-  aplicando backpressure real al origen. Antes, un consumidor sostenidamente lento
-  saturaba el buffer y reseteaba el stream; ahora se frena sin perder bytes.
-- Negociación de capacidad: el control de flujo sólo se activa si ambos extremos lo
-  soportan (compatibilidad con versiones antiguas; fallback al modo previo).
+### Added / Improved
+- **Credit-based flow control on tunnels** (port forwarding): each direction of each
+  stream has an in-flight byte window; the receiver grants credit (`tunnel_window`) as
+  it drains and the sender stops reading its local TCP when it runs out, applying real
+  backpressure to the origin. Previously a sustained slow consumer saturated the buffer
+  and reset the stream; now it throttles without losing bytes.
+- Capability negotiation: flow control is only enabled if both ends support it
+  (backward compatible; falls back to the previous mode).
 
 ## [1.1.0] — 2026-06-20
 
-### Añadido
-- **Comprobación de actualizaciones (check-and-notify):** el agente consulta cada
-  6 h GitHub Releases y, si hay una versión más reciente, lo registra en log y avisa
-  al backend (el panel muestra "actualización disponible"). El agente **no** se
-  auto-reemplaza, para preservar el hardening del servicio.
-- **Imágenes Docker multi-arch** en GHCR (`ghcr.io/koyere/auranode-agent`),
-  `linux/amd64` y `linux/arm64`, publicadas automáticamente en cada release.
+### Added
+- **Update check (check-and-notify):** the agent polls GitHub Releases every 6h and,
+  if a newer version exists, logs it and notifies the backend (the panel shows "update
+  available"). The agent does **not** self-replace, to preserve the service hardening.
+- **Multi-arch Docker images** on GHCR (`ghcr.io/koyere/auranode-agent`),
+  `linux/amd64` and `linux/arm64`, published automatically on every release.
 
 ## [1.0.0] — 2026-06-20
 
-Primer release público del agente.
+First public release of the agent.
 
-### Añadido
-- Recolección de métricas: CPU, RAM/swap, disco, red (delta/s), load avg y top-10
-  procesos (vía gopsutil).
-- Conexión WebSocket al backend con reconexión exponencial (backoff 2s → 5min).
-- Heartbeat y métricas con intervalos configurables desde el backend.
-- Buffer offline persistente en disco (bbolt) y drenado al reconectar.
-- Ejecución remota de comandos (`exec`) con timeout y output acotado.
-- Motor de reglas local: condición + duración, cooldown y máximo por día.
-- Port forwarding / túneles (Tipo 1 local-CLI, Tipo 2 remote y dest=CLI).
-- Migraciones entre VPS (Tipo B: directorio, modo relay) con reanudación.
-- Instalador con verificación SHA256, servicio systemd con hardening y Dockerfile.
+### Added
+- Metric collection: CPU, RAM/swap, disk, network (delta/s), load avg and top-10
+  processes (via gopsutil).
+- WebSocket connection to the backend with exponential reconnection (backoff 2s → 5min).
+- Heartbeat and metrics with intervals configurable from the backend.
+- Persistent on-disk offline buffer (bbolt), drained on reconnect.
+- Remote command execution (`exec`) with timeout and bounded output.
+- Local rules engine: condition + duration, cooldown and daily maximum.
+- Port forwarding / tunnels (Type 1 local-CLI, Type 2 remote and dest=CLI).
+- VPS-to-VPS migrations (Type B: directory, relay mode) with resume.
+- Installer with SHA256 verification, hardened systemd service and Dockerfile.

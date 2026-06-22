@@ -1,4 +1,4 @@
-// Package connection gestiona la conexión WebSocket al backend con reconexión exponencial.
+// Package connection manages the WebSocket connection to the backend with exponential reconnection.
 package connection
 
 import (
@@ -23,7 +23,7 @@ const (
 	pongTimeout  = 60 * time.Second
 )
 
-// MessageHandler procesa mensajes recibidos desde el backend.
+// MessageHandler processes messages received from the backend.
 type MessageHandler interface {
 	OnConnect(ctx context.Context, send func(any) error)
 	OnDisconnect()
@@ -38,8 +38,8 @@ type MessageHandler interface {
 	OnTunnelData(msg proto.TunnelData)
 	OnTunnelClose(msg proto.TunnelClose)
 	OnTunnelWindow(msg proto.TunnelWindow)
-	// OnMigration recibe todos los mensajes migration_* (sub-protocolo de migración);
-	// el Manager hace su propio despacho interno por tipo.
+	// OnMigration receives all migration_* messages (migration sub-protocol);
+	// the Manager does its own internal dispatch by type.
 	OnMigration(msgType string, raw []byte)
 }
 
@@ -52,10 +52,10 @@ type Client struct {
 	mu   sync.Mutex
 	conn *websocket.Conn
 
-	// writeMu serializa TODA escritura sobre la conexión WebSocket. gorilla/websocket
-	// no permite escrituras concurrentes; sin esto, el heartbeat/metrics y las
-	// respuestas del gestor de archivos (fs_response) podían escribir a la vez y
-	// provocar un panic "concurrent write to websocket connection".
+	// writeMu serializes ALL writes to the WebSocket connection. gorilla/websocket
+	// does not allow concurrent writes; without this, heartbeat/metrics and the
+	// file-manager responses (fs_response) could write at the same time and
+	// trigger a "concurrent write to websocket connection" panic.
 	writeMu sync.Mutex
 
 	sendCh chan any
@@ -71,7 +71,7 @@ func New(url, token string, handler MessageHandler, log *zap.Logger) *Client {
 	}
 }
 
-// Send encola un mensaje para enviar al backend (thread-safe).
+// Send queues a message to send to the backend (thread-safe).
 func (c *Client) Send(msg any) {
 	select {
 	case c.sendCh <- msg:
@@ -80,7 +80,7 @@ func (c *Client) Send(msg any) {
 	}
 }
 
-// Run conecta y mantiene la conexión. Bloquea hasta que ctx sea cancelado.
+// Run connects and keeps the connection. Blocks until ctx is cancelled.
 func (c *Client) Run(ctx context.Context) {
 	attempt := 0
 	for {
@@ -138,7 +138,7 @@ func (c *Client) connect(ctx context.Context) error {
 		return nil
 	})
 
-	// Función de envío que usa la conexión actual
+	// Send function that uses the current connection
 	sendFn := func(msg any) error {
 		data, err := json.Marshal(msg)
 		if err != nil {
@@ -152,7 +152,7 @@ func (c *Client) connect(ctx context.Context) error {
 
 	c.handler.OnConnect(ctx, sendFn)
 
-	// Drainer: escribe todo lo que llegue al canal
+	// Drainer: writes everything that arrives on the channel
 	writeErr := make(chan error, 1)
 	go func() {
 		pingTicker := time.NewTicker(30 * time.Second)
@@ -289,7 +289,7 @@ func (c *Client) dispatch(data []byte) {
 		}
 
 	case proto.TypeAgentPing:
-		// El pong lo gestiona la capa WebSocket automáticamente
+		// The pong is handled automatically by the WebSocket layer
 
 	default:
 		if strings.HasPrefix(env.Type, "migration_") {
