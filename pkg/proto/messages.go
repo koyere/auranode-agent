@@ -36,6 +36,11 @@ const (
 	TypeTunnelClose   = "tunnel_close"
 	TypeTunnelStatus  = "tunnel_status"
 	TypeTunnelWindow  = "tunnel_window" // credit-based flow control (receiver→sender)
+	// Terminal web (PTY interactivo)
+	TypePTYStart  = "pty_start"  // backend→agente
+	TypePTYData   = "pty_data"   // ambos sentidos (stdin backend→agente, stdout agente→backend)
+	TypePTYResize = "pty_resize" // backend→agente
+	TypePTYClose  = "pty_close"  // ambos sentidos
 )
 
 // ─── File-manager operations (SFTP) ──────────────────────────────────────────
@@ -435,3 +440,32 @@ type MigrationMsg struct {
 	Code     string             `json:"code,omitempty"`
 	Message  string             `json:"message,omitempty"`
 }
+
+// --- Terminal web (PTY) ---
+
+type PTYStart struct {
+	Envelope
+	SessionID string `json:"session_id"`
+	Cols      uint16 `json:"cols"`
+	Rows      uint16 `json:"rows"`
+}
+
+type PTYData struct {
+	Envelope
+	SessionID string `json:"session_id"`
+	Data      string `json:"data"` // base64
+}
+
+type PTYResize struct {
+	Envelope
+	SessionID string `json:"session_id"`
+	Cols      uint16 `json:"cols"`
+	Rows      uint16 `json:"rows"`
+}
+
+type PTYClose struct {
+	Envelope
+	SessionID string `json:"session_id"`
+	Error     string `json:"error,omitempty"`
+}
+

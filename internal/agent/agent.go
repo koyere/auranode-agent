@@ -18,6 +18,7 @@ import (
 	agentfs "github.com/koyere/auranode-agent/internal/fs"
 	"github.com/koyere/auranode-agent/internal/migration"
 	"github.com/koyere/auranode-agent/internal/rules"
+	"github.com/koyere/auranode-agent/internal/terminal"
 	"github.com/koyere/auranode-agent/internal/tunnel"
 	"github.com/koyere/auranode-agent/internal/updater"
 	"github.com/koyere/auranode-agent/pkg/proto"
@@ -31,6 +32,7 @@ type Agent struct {
 	buf        *buffer.Buffer
 	engine     *rules.Engine
 	tunnels    *tunnel.Manager
+	terminals  *terminal.Manager
 	migrations *migration.Manager
 	updater    *updater.Updater
 	ws         *connection.Client
@@ -79,6 +81,7 @@ func New(cfg *agentcfg.Config, log *zap.Logger) (*Agent, error) {
 	}, log)
 
 	a.tunnels = tunnel.New(log)
+	a.terminals = terminal.NewManager(log)
 	a.migrations = migration.New(log, dirOf(cfg.DBPath))
 
 	// Updater check-and-notify: tells the backend when a newer version is available.
@@ -118,6 +121,7 @@ func (a *Agent) OnConnect(ctx context.Context, sendFn func(any) error) {
 	a.sendFn = sendFn
 	a.mu.Unlock()
 	a.tunnels.SetSend(sendFn)
+	a.terminals.SetSend(sendFn)
 	a.migrations.SetSend(sendFn)
 
 	// 1. Send agent_info
@@ -151,6 +155,8 @@ func (a *Agent) OnDisconnect() {
 	// Without a backend connection tunnels cannot relay: close everything.
 	a.tunnels.SetSend(nil)
 	a.tunnels.Shutdown()
+	a.terminals.SetSend(nil)
+	a.terminals.Shutdown()
 	// Migrations also cannot continue without the backend; they will be left INTERRUPTED.
 	a.migrations.SetSend(nil)
 	a.migrations.Shutdown()
@@ -258,6 +264,18 @@ func (a *Agent) OnTunnelStart(msg proto.TunnelStart) {
 		zap.String("tunnel_id", msg.TunnelID), zap.Int("local_port", msg.LocalPort),
 		zap.String("bind_addr", msg.BindAddr))
 	a.tunnels.StartListener(msg.TunnelID, msg.LocalPort, msg.BindAddr)
+}
+
+func (a *Agent) OnPTYStart(msg proto.PTYStart) {
+	a.log.Info("pty: start", zap.String("session_id", msg.SessionID))
+	a.terminals.Start(msg)
+}
+
+func (a *Agent) OnPTYData(msg proto.PTYData)   { a.terminals.Data(msg) }
+func (a *Agent) OnPTYResize(msg proto.PTYResize) { a.terminals.Resize(msg) }
+func (a *Agent) OnPTYClose(msg proto.PTYClose) {
+	a.log.Info("pty: close", zap.String("session_id", msg.SessionID))
+	a.terminals.Close(msg.SessionID)
 }
 
 func (a *Agent) OnTunnelStop(msg proto.TunnelStop) {

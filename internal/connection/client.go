@@ -38,6 +38,10 @@ type MessageHandler interface {
 	OnTunnelData(msg proto.TunnelData)
 	OnTunnelClose(msg proto.TunnelClose)
 	OnTunnelWindow(msg proto.TunnelWindow)
+	OnPTYStart(msg proto.PTYStart)
+	OnPTYData(msg proto.PTYData)
+	OnPTYResize(msg proto.PTYResize)
+	OnPTYClose(msg proto.PTYClose)
 	// OnMigration receives all migration_* messages (migration sub-protocol);
 	// the Manager does its own internal dispatch by type.
 	OnMigration(msgType string, raw []byte)
@@ -286,6 +290,30 @@ func (c *Client) dispatch(data []byte) {
 		var msg proto.TunnelWindow
 		if json.Unmarshal(data, &msg) == nil {
 			c.handler.OnTunnelWindow(msg)
+		}
+
+	case proto.TypePTYStart:
+		var msg proto.PTYStart
+		if json.Unmarshal(data, &msg) == nil {
+			c.handler.OnPTYStart(msg)
+		}
+
+	case proto.TypePTYData:
+		var msg proto.PTYData
+		if json.Unmarshal(data, &msg) == nil {
+			c.handler.OnPTYData(msg)
+		}
+
+	case proto.TypePTYResize:
+		var msg proto.PTYResize
+		if json.Unmarshal(data, &msg) == nil {
+			c.handler.OnPTYResize(msg)
+		}
+
+	case proto.TypePTYClose:
+		var msg proto.PTYClose
+		if json.Unmarshal(data, &msg) == nil {
+			c.handler.OnPTYClose(msg)
 		}
 
 	case proto.TypeAgentPing:

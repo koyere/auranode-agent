@@ -4,6 +4,16 @@ All notable versions of the AuraNode agent are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/) and
 [SemVer](https://semver.org/).
 
+## [1.4.0] — 2026-06-23
+
+### Added
+- **Web terminal (PTY):** the agent can now open an interactive shell (a PTY running
+  `bash` as the agent's own unprivileged user) on request from the backend, streaming
+  stdin/stdout and honoring terminal resizes. This powers the browser-based web terminal
+  in the dashboard. One session per agent; the shell inherits the agent's hardened
+  context (no privilege escalation). Fully backward compatible: older agents ignore the
+  new `pty_*` protocol messages and simply do not offer a terminal.
+
 ## [1.3.0] — 2026-06-22
 
 ### Added
