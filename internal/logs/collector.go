@@ -1,8 +1,8 @@
-// Package logs recolecta entradas del journal de systemd (solo lectura) y las
-// transmite al backend como log_stream. El agente corre sin privilegios; para leer
-// el journal del sistema necesita pertenecer al grupo `systemd-journal` (lo concede
-// el instalador). Si journalctl no está disponible o no hay acceso, el colector
-// simplemente no produce entradas (no es un error fatal).
+// Package logs collects systemd journal entries (read-only) and streams them to
+// the backend as log_stream. The agent runs unprivileged; to read the system
+// journal it must belong to the `systemd-journal` group (granted by the
+// installer). If journalctl is unavailable or access is denied, the collector
+// simply produces no entries (not a fatal error).
 package logs
 
 import (
@@ -22,14 +22,14 @@ import (
 
 const (
 	flushInterval = 2 * time.Second
-	maxBatchLines = 200 // tope por flush para no inundar el backend
-	backlogLines  = 30  // backlog inicial al arrancar (contexto inmediato en el panel)
+	maxBatchLines = 200 // cap per flush to avoid flooding the backend
+	backlogLines  = 30  // initial backlog at startup (immediate context in the panel)
 )
 
 type Collector struct {
 	mu       sync.Mutex
 	sendFn   func(any) error
-	services map[string]bool // filtro de unidades; vacío = todas
+	services map[string]bool // unit filter; empty = all
 	log      *zap.Logger
 	cancel   context.CancelFunc
 }
@@ -44,7 +44,7 @@ func (c *Collector) SetSend(fn func(any) error) {
 	c.mu.Unlock()
 }
 
-// Configure fija el filtro de servicios (lista de unidades). Vacío = recolectar todo.
+// Configure sets the service filter (list of units). Empty = collect everything.
 func (c *Collector) Configure(services []string) {
 	c.mu.Lock()
 	c.services = make(map[string]bool, len(services))
@@ -63,20 +63,32 @@ func (c *Collector) send(msg any) {
 	}
 }
 
+// selfUnits are AuraNode's own systemd units: their logs are self-referential
+// noise (WebSocket reconnections, etc.) that would skew server diagnostics, so
+// they are never collected.
+var selfUnits = map[string]bool{
+	"auranode-agent":        true,
+	"auranode-agent-helper": true,
+}
+
 func (c *Collector) allowed(service string) bool {
+	base := strings.TrimSuffix(service, ".service")
+	if selfUnits[base] {
+		return false
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if len(c.services) == 0 {
 		return true
 	}
-	return c.services[service] || c.services[strings.TrimSuffix(service, ".service")]
+	return c.services[service] || c.services[base]
 }
 
-// Start arranca el seguimiento del journal en una goroutine. Idempotente: cancela un
-// seguimiento previo. Se reinicia si journalctl termina (p. ej. rotación).
+// Start begins following the journal in a goroutine. Idempotent: it cancels a
+// previous follow. It restarts if journalctl exits (e.g. rotation).
 func (c *Collector) Start(parent context.Context) {
 	if _, err := exec.LookPath("journalctl"); err != nil {
-		c.log.Info("logs: journalctl no disponible, colector deshabilitado")
+		c.log.Info("logs: journalctl unavailable, collector disabled")
 		return
 	}
 	c.Stop()
@@ -103,7 +115,7 @@ func (c *Collector) run(ctx context.Context) {
 			return
 		}
 		c.follow(ctx)
-		// journalctl terminó (rotación/error): pequeña espera y reintento.
+		// journalctl exited (rotation/error): short wait and retry.
 		select {
 		case <-ctx.Done():
 			return
@@ -112,8 +124,8 @@ func (c *Collector) run(ctx context.Context) {
 	}
 }
 
-// follow ejecuta `journalctl -f -o json` y va emitiendo lo que lee hasta que ctx
-// se cancela o el proceso termina.
+// follow runs `journalctl -f -o json` and emits what it reads until ctx is
+// canceled or the process exits.
 func (c *Collector) follow(ctx context.Context) {
 	cmd := exec.CommandContext(ctx, "journalctl",
 		"-f", "-o", "json", "--no-pager", "-n", strconv.Itoa(backlogLines))
@@ -128,7 +140,7 @@ func (c *Collector) follow(ctx context.Context) {
 	}
 	defer func() { _ = cmd.Wait() }()
 
-	// Acumulador agrupado por servicio + flush periódico.
+	// Accumulator grouped by service + periodic flush.
 	pending := map[string][]proto.LogLine{}
 	var count int
 	ticker := time.NewTicker(flushInterval)
@@ -191,9 +203,9 @@ func (c *Collector) follow(ctx context.Context) {
 	}
 }
 
-// journalEntry mapea los campos de `journalctl -o json` que nos interesan. journald
-// emite los valores como string (o array de bytes para binarios); usamos json.RawMessage
-// y los decodificamos de forma tolerante.
+// journalEntry maps the fields of `journalctl -o json` we care about. journald
+// emits values as strings (or byte arrays for binaries); we decode them
+// tolerantly via jsonStr.
 type journalEntry struct {
 	Realtime   jsonStr `json:"__REALTIME_TIMESTAMP"`
 	Priority   jsonStr `json:"PRIORITY"`
@@ -210,7 +222,7 @@ func (e journalEntry) toLine() (string, proto.LogLine, bool) {
 	}
 	service := firstNonEmpty(string(e.Identifier), strings.TrimSuffix(string(e.Unit), ".service"), string(e.Comm), "system")
 
-	// __REALTIME_TIMESTAMP viene en microsegundos desde epoch.
+	// __REALTIME_TIMESTAMP comes in microseconds since epoch.
 	ts := time.Now().Unix()
 	if us, err := strconv.ParseInt(string(e.Realtime), 10, 64); err == nil && us > 0 {
 		ts = us / 1_000_000
@@ -227,7 +239,7 @@ func priorityToLevel(p string) string {
 		return "warn"
 	case "7":
 		return "debug"
-	default: // 5, 6 o desconocido
+	default: // 5, 6 or unknown
 		return "info"
 	}
 }
@@ -241,8 +253,8 @@ func firstNonEmpty(vals ...string) string {
 	return "system"
 }
 
-// jsonStr decodifica un campo del journal que puede venir como string JSON o como
-// array de números (bytes, para mensajes no-UTF8). Cualquier otro caso → "".
+// jsonStr decodes a journal field that may come as a JSON string or as an array
+// of numbers (bytes, for non-UTF8 messages). Anything else → "".
 type jsonStr string
 
 func (s *jsonStr) UnmarshalJSON(b []byte) error {

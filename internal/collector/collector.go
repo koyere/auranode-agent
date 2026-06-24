@@ -2,6 +2,7 @@ package collector
 
 import (
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/shirou/gopsutil/v3/cpu"
@@ -86,11 +87,13 @@ func (c *Collector) Collect() proto.Metrics {
 		m.RAM.SwapUsedMB = int64(s.Used / 1024 / 1024)
 	}
 
-	// Disk
+	// Disk: real filesystems only. Pseudo ones (squashfs from snaps, tmpfs,
+	// overlay…) are skipped — on Ubuntu they show up at 100% because they are
+	// read-only or volatile, which would fake a "disk full".
 	if partitions, err := disk.Partitions(false); err == nil {
 		seen := make(map[string]bool)
 		for _, p := range partitions {
-			if seen[p.Mountpoint] {
+			if seen[p.Mountpoint] || isPseudoFS(p.Fstype, p.Mountpoint) {
 				continue
 			}
 			seen[p.Mountpoint] = true
@@ -180,4 +183,29 @@ func (c *Collector) Collect() proto.Metrics {
 	}
 
 	return m
+}
+
+// pseudoFstypes are virtual/non-physical filesystem types that do not represent
+// real storage and must not count as disk usage.
+var pseudoFstypes = map[string]bool{
+	"squashfs": true, "tmpfs": true, "devtmpfs": true, "overlay": true,
+	"aufs": true, "ramfs": true, "proc": true, "sysfs": true,
+	"cgroup": true, "cgroup2": true, "devpts": true, "mqueue": true,
+	"debugfs": true, "tracefs": true, "securityfs": true, "pstore": true,
+	"autofs": true, "binfmt_misc": true, "configfs": true, "fusectl": true,
+	"hugetlbfs": true, "nsfs": true, "bpf": true, "efivarfs": true,
+	"fuse.snapfuse": true, "fuse.gvfsd-fuse": true, "fuse.portal": true,
+}
+
+// isPseudoFS reports whether a mount should be ignored because it is a virtual
+// filesystem (squashfs from snaps, tmpfs, overlay…) or lives under system paths.
+func isPseudoFS(fstype, mount string) bool {
+	if pseudoFstypes[strings.ToLower(fstype)] {
+		return true
+	}
+	return strings.HasPrefix(mount, "/snap/") ||
+		strings.HasPrefix(mount, "/proc") ||
+		strings.HasPrefix(mount, "/sys") ||
+		strings.HasPrefix(mount, "/dev") ||
+		strings.HasPrefix(mount, "/run")
 }

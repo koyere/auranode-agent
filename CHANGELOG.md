@@ -4,6 +4,23 @@ All notable versions of the AuraNode agent are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/) and
 [SemVer](https://semver.org/).
 
+## [1.7.0] — 2026-06-24
+
+### Fixed — Disk and log metric accuracy
+
+- **Disk usage no longer counts pseudo filesystems.** The agent previously reported every
+  mount, including the read-only `squashfs` mounts of snaps (`/snap/...`), which always sit
+  at 100%. That made the dashboard and the AI report a "disk full" while the real root
+  filesystem was far below capacity. The collector now ignores virtual/pseudo filesystems
+  (`squashfs`, `tmpfs`, `devtmpfs`, `overlay`, …) and system paths (`/snap`, `/proc`,
+  `/sys`, `/dev`, `/run`), reporting only real storage.
+- **The agent no longer collects its own logs.** Its systemd units (`auranode-agent`,
+  `auranode-agent-helper`) emit self-referential noise (e.g. WebSocket reconnections) that
+  polluted server diagnostics. They are now always excluded from journal collection.
+
+To apply on an existing install, re-run the installer (`curl … | sudo bash`) or restart the
+service after updating the binary.
+
 ## [1.6.0] — 2026-06-24
 
 ### Added — System log collection (read-only)
