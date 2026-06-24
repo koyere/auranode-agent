@@ -139,6 +139,13 @@ case "$MODE" in
 esac
 
 TOKEN="${AURANODE_TOKEN:-}"
+# Update mode: if no token was provided but the agent is already installed, reuse the
+# token already stored on this machine. This lets users update later (months after the
+# install) by just re-running the installer, without needing the token again.
+if [[ -z "$TOKEN" && -f "$ENV_FILE" ]]; then
+  TOKEN="$(grep -oP '^AURANODE_TOKEN=\K.*' "$ENV_FILE" 2>/dev/null || true)"
+  [[ -n "$TOKEN" ]] && info "Reusing the token already stored on this server (update mode)."
+fi
 [[ -z "$TOKEN" ]] && error "AURANODE_TOKEN is not set. Get your token at https://panel.auranode.app"
 if ! echo "$TOKEN" | grep -qE '^ant_[A-Za-z0-9_-]{32,}$'; then
   error "Invalid token format. Check the token in your AuraNode panel."
