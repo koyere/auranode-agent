@@ -2,7 +2,10 @@
 package rules
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"net/http"
 	"sync"
 	"time"
 
@@ -134,7 +137,13 @@ func (e *Engine) fire(ctx context.Context, r proto.RuleDefinition, triggerValue 
 		}
 	case "webhook":
 		actionTaken = "webhook:" + r.ActionWebhookURL
-		e.log.Info("rule fired: webhook (not implemented)", zap.String("rule_id", r.RuleID))
+		if r.ActionWebhookURL != "" {
+			exitStatus = e.postWebhook(ctx, r, triggerValue)
+			e.log.Info("rule fired: webhook sent",
+				zap.String("rule_id", r.RuleID),
+				zap.Int("status", exitStatus),
+			)
+		}
 	default:
 		actionTaken = r.ActionType
 	}
@@ -149,6 +158,44 @@ func (e *Engine) fire(ctx context.Context, r proto.RuleDefinition, triggerValue 
 		ActionTaken:  actionTaken,
 		ExitStatus:   exitStatus,
 	})
+}
+
+// webhookClient reutiliza conexiones y aplica un timeout duro.
+var webhookClient = &http.Client{Timeout: 10 * time.Second}
+
+// postWebhook envía un POST JSON con los datos del disparo. Devuelve un "exit
+// status" estilo comando: 0 si la respuesta es 2xx; el código HTTP (p. ej. 404,
+// 500) si no; 1 si el envío falló (DNS, timeout, conexión). Así el panel muestra
+// un resultado útil en la columna de código de salida.
+func (e *Engine) postWebhook(ctx context.Context, r proto.RuleDefinition, triggerValue float64) int {
+	body, _ := json.Marshal(map[string]any{
+		"rule_id":   r.RuleID,
+		"metric":    r.TriggerMetric,
+		"operator":  r.TriggerOp,
+		"threshold": r.TriggerValue,
+		"value":     triggerValue,
+		"fired_at":  time.Now().UTC().Format(time.RFC3339),
+	})
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.ActionWebhookURL, bytes.NewReader(body))
+	if err != nil {
+		e.log.Warn("webhook: petición inválida", zap.String("rule_id", r.RuleID), zap.Error(err))
+		return 1
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "AuraNode-Agent")
+
+	resp, err := webhookClient.Do(req)
+	if err != nil {
+		e.log.Warn("webhook: envío falló", zap.String("rule_id", r.RuleID), zap.Error(err))
+		return 1
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return 0
+	}
+	return resp.StatusCode
 }
 
 // extractMetric extracts the numeric value of the given metric.

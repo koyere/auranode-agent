@@ -4,6 +4,17 @@ All notable versions of the AuraNode agent are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/) and
 [SemVer](https://semver.org/).
 
+## [1.5.1] — 2026-06-24
+
+### Added
+- **Automation `webhook` action implemented.** When an automation rule with a
+  `webhook` action fires, the agent now sends a `POST` (JSON, 10s timeout) to the
+  configured URL with the trigger context: `rule_id`, `metric`, `operator`,
+  `threshold`, `value` and `fired_at` (RFC3339). The result is reported back as the
+  rule's exit status: `0` on a `2xx` response, the HTTP status code otherwise (e.g.
+  `404`, `500`), or `1` on a transport error — so the panel's "Executions" tab shows
+  a meaningful outcome. (Previously this action was a no-op.)
+
 ## [1.5.0] — 2026-06-24
 
 ### Added — Bounded privileged mode (opt-in, OFF by default)
