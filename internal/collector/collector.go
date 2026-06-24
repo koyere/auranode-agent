@@ -13,6 +13,7 @@ import (
 	"github.com/shirou/gopsutil/v3/process"
 	"go.uber.org/zap"
 
+	"github.com/koyere/auranode-agent/internal/privileged"
 	"github.com/koyere/auranode-agent/pkg/proto"
 )
 
@@ -50,6 +51,8 @@ func (c *Collector) SystemInfo(version string) proto.AgentInfo {
 	if v, err := mem.VirtualMemory(); err == nil {
 		info.TotalRAMMB = int64(v.Total / 1024 / 1024)
 	}
+
+	info.PrivilegedAvailable = privileged.Available()
 
 	return info
 }

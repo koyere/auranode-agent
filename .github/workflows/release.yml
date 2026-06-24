@@ -36,10 +36,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Release notes = the top (current) section of CHANGELOG.md, so the GitHub
+      # release body is the well-defined, human-written changelog (not raw commits).
+      - name: Extract release notes
+        run: |
+          awk '/^## \[/{n++; if(n==1) next} n==1{print} n>=2{exit}' CHANGELOG.md > RELEASE_NOTES.md
+          echo "----- release notes -----"; cat RELEASE_NOTES.md
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
-          args: release --clean
+          args: release --clean --release-notes=RELEASE_NOTES.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

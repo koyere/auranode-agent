@@ -4,6 +4,52 @@ All notable versions of the AuraNode agent are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/) and
 [SemVer](https://semver.org/).
 
+## [1.5.0] — 2026-06-24
+
+### Added — Bounded privileged mode (opt-in, OFF by default)
+
+This release adds an **optional** way to run a small, fixed set of administrative
+tasks (package updates, service restarts) from the panel. It is designed to be the
+opposite of "give the panel root": every part is opt-in, bounded, validated, and
+audited. If you do nothing, **nothing changes** — the agent keeps running exactly as
+before.
+
+**The agent itself does not gain any privileges.** It still runs as the unprivileged
+`auranode` user with `NoNewPrivileges`, `ProtectSystem=strict` and an empty
+`CapabilityBoundingSet`. Privileged tasks are handled by a **separate** helper:
+
+- **Separate root helper, separate unit.** Privileged actions run in
+  `auranode-agent-helper.service` (a distinct systemd unit running as root), not in
+  the agent. The agent talks to it over a local Unix socket and only acts as a bridge.
+  The helper is installed **only** if the server operator runs
+  `curl … | sudo bash -s -- --enable-privileged` on the machine itself — it is never
+  installed automatically.
+- **Two independent opt-ins.** The helper must be installed on the box (local consent)
+  **and** the account **owner** must enable privileged mode for that server in the
+  panel (with an explicit confirmation). Neither step alone does anything.
+- **Not arbitrary sudo — a fixed whitelist.** The only actions that exist are:
+  `apt`/`dnf` update, upgrade, install, autoremove; and `systemctl`
+  status/start/stop/reload/restart. There is no "run this command" path.
+- **No shell, no injection.** Commands are executed with an explicit `argv`
+  (no `bash -c`), so shell metacharacters are inert. Arguments are validated with
+  strict allowlists (package names, unit names).
+- **Guards against foot-guns.** The helper refuses to manage the agent itself
+  (`auranode-agent*`) and refuses to **stop** critical units (`ssh`, `dbus`,
+  networking, `systemd-journald`, `systemd-logind`, …) that would lock you out.
+- **Defense in depth.** The helper re-validates every request against the same
+  whitelist server-side, so a compromised agent still cannot run anything off-list.
+- **Locked-down socket.** The socket lives at `/run/auranode/helper.sock`, owned by
+  root and group-restricted to the `auranode` user (mode `0660`); one action runs at a
+  time; each action has a timeout and bounded output.
+- **Fully audited.** Enabling/disabling the mode and every action (with its arguments
+  and exit code) are written to the audit log.
+- **`auranode-agent version` subcommand** advertises `privileged-capable`, so the
+  installer refuses to enable the helper on an incompatible binary.
+
+**Backward compatible.** Agents without the helper report it as unavailable and the
+panel keeps the feature hidden/disabled; the new `sys_action` protocol messages are
+ignored by older agents. To revert at any time: `… | sudo bash -s -- --disable-privileged`.
+
 ## [1.4.0] — 2026-06-23
 
 ### Added

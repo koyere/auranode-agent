@@ -17,6 +17,7 @@ import (
 	"github.com/koyere/auranode-agent/internal/executor"
 	agentfs "github.com/koyere/auranode-agent/internal/fs"
 	"github.com/koyere/auranode-agent/internal/migration"
+	"github.com/koyere/auranode-agent/internal/privileged"
 	"github.com/koyere/auranode-agent/internal/rules"
 	"github.com/koyere/auranode-agent/internal/terminal"
 	"github.com/koyere/auranode-agent/internal/tunnel"
@@ -228,6 +229,36 @@ func (a *Agent) OnExec(cmd proto.ExecCommand) {
 	} else {
 		go run() // always a goroutine so the reader is not blocked
 	}
+}
+
+// OnSysAction ejecuta una acción privilegiada de la whitelist reenviándola al
+// helper root local. El agente principal no escala: solo hace de puente. El helper
+// revalida la acción. Siempre en goroutine para no bloquear el lector.
+func (a *Agent) OnSysAction(msg proto.SysAction) {
+	a.log.Info("sys_action: acción privilegiada recibida",
+		zap.String("id", msg.ActionID), zap.String("action", msg.Action))
+
+	go func() {
+		resp := privileged.Execute(privileged.Request{Action: msg.Action, Args: msg.Args})
+
+		a.mu.Lock()
+		fn := a.sendFn
+		a.mu.Unlock()
+		if fn == nil {
+			return
+		}
+		fn(proto.SysActionResult{ //nolint:errcheck
+			Envelope:   proto.Envelope{Type: proto.TypeSysActionResult, Timestamp: time.Now().Unix()},
+			ActionID:   msg.ActionID,
+			OK:         resp.OK,
+			Rejected:   resp.Rejected,
+			ExitStatus: resp.ExitStatus,
+			Stdout:     resp.Stdout,
+			Stderr:     resp.Stderr,
+			Error:      resp.Error,
+			DurationMS: resp.DurationMS,
+		})
+	}()
 }
 
 func (a *Agent) OnRuleSync(rs proto.RuleSync) {

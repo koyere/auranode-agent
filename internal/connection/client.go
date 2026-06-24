@@ -29,6 +29,7 @@ type MessageHandler interface {
 	OnDisconnect()
 	OnConfig(cfg proto.AgentConfig)
 	OnExec(cmd proto.ExecCommand)
+	OnSysAction(msg proto.SysAction)
 	OnRuleSync(rs proto.RuleSync)
 	OnFS(req proto.FSRequest)
 	OnTunnelStart(msg proto.TunnelStart)
@@ -236,6 +237,12 @@ func (c *Client) dispatch(data []byte) {
 		var cmd proto.ExecCommand
 		if json.Unmarshal(data, &cmd) == nil {
 			c.handler.OnExec(cmd)
+		}
+
+	case proto.TypeSysAction:
+		var msg proto.SysAction
+		if json.Unmarshal(data, &msg) == nil {
+			c.handler.OnSysAction(msg)
 		}
 
 	case proto.TypeRuleSync:

@@ -18,6 +18,7 @@ const (
 	TypeAlert           = "alert"
 	TypeFSResponse      = "fs_response"
 	TypeUpdateAvailable = "update_available"
+	TypeSysActionResult = "sys_action_result" // resultado de una acción privilegiada
 	TypeError           = "error"
 
 	// Backend → Agent
@@ -26,6 +27,7 @@ const (
 	TypeRuleSync  = "rule_sync"
 	TypeFSRequest = "fs_request"
 	TypeAgentPing = "ping"
+	TypeSysAction = "sys_action" // ejecutar una acción privilegiada de la whitelist
 
 	// ── Port forwarding (tunnels) ──────────────────────────────────────────────
 	TypeTunnelStart   = "tunnel_start"
@@ -75,6 +77,31 @@ type AgentInfo struct {
 	CPUCores   int    `json:"cpu_cores"`
 	TotalRAMMB int64  `json:"total_ram_mb"`
 	Kernel     string `json:"kernel"`
+	// PrivilegedAvailable indica si el helper root está instalado en la VPS
+	// (modo privilegiado acotado disponible para activar desde el panel).
+	PrivilegedAvailable bool `json:"privileged_available"`
+}
+
+// SysAction: Backend → Agent. Solicita ejecutar una acción privilegiada de la
+// whitelist. El agente la reenvía al helper root (que revalida).
+type SysAction struct {
+	Envelope
+	ActionID string            `json:"action_id"`
+	Action   string            `json:"action"`
+	Args     map[string]string `json:"args,omitempty"`
+}
+
+// SysActionResult: Agent → Backend. Resultado de una acción privilegiada.
+type SysActionResult struct {
+	Envelope
+	ActionID   string `json:"action_id"`
+	OK         bool   `json:"ok"`
+	Rejected   bool   `json:"rejected,omitempty"`
+	ExitStatus int    `json:"exit_status"`
+	Stdout     string `json:"stdout"`
+	Stderr     string `json:"stderr"`
+	Error      string `json:"error,omitempty"`
+	DurationMS int64  `json:"duration_ms"`
 }
 
 type Heartbeat struct {

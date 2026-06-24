@@ -23,11 +23,107 @@ LOG_DIR="/var/log/auranode"
 ENV_FILE="${CONFIG_DIR}/agent.env"
 AGENT_VERSION="${AURANODE_AGENT_VERSION:-latest}"
 BACKEND_URL="${AURANODE_BACKEND_URL:-wss://api.auranode.app/ws/agent}"
+HELPER_SERVICE="auranode-agent-helper"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 info()  { echo -e "${GREEN}[auranode]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[auranode]${NC} $*"; }
 error() { echo -e "${RED}[auranode] ERROR:${NC} $*" >&2; exit 1; }
+
+# ─── Mode parsing ──────────────────────────────────────────────────────────────
+# Default: full install. --enable-privileged / --disable-privileged manage the
+# optional, opt-in privileged helper (bounded whitelist mode, NOT full root).
+MODE="install"
+for arg in "$@"; do
+  case "$arg" in
+    --enable-privileged)  MODE="enable-privileged" ;;
+    --disable-privileged) MODE="disable-privileged" ;;
+  esac
+done
+
+# write_helper_unit instala el unit del helper root. El helper corre como root y SIN
+# el endurecimiento del agente (necesita escribir el sistema: apt, systemctl), pero
+# solo ejecuta acciones de una whitelist con argumentos validados (no es sudo libre).
+write_helper_unit() {
+  cat > "/etc/systemd/system/${HELPER_SERVICE}.service" <<EOF
+[Unit]
+Description=AuraNode Agent — Privileged Helper (bounded whitelist)
+Documentation=https://docs.auranode.app/agent/privileged
+After=${SERVICE_NAME}.service
+PartOf=${SERVICE_NAME}.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=${INSTALL_DIR}/${BINARY_NAME} privileged-helper
+Restart=on-failure
+RestartSec=10s
+TimeoutStopSec=15s
+
+# El socket vive en /run/auranode (lo crea systemd, propiedad root).
+RuntimeDirectory=auranode
+RuntimeDirectoryMode=0755
+
+# El helper SÍ necesita escalar para apt/systemctl (de ahí este unit separado).
+NoNewPrivileges=no
+
+MemoryMax=512M
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=${HELPER_SERVICE}
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+
+enable_privileged() {
+  [[ -x "${INSTALL_DIR}/${BINARY_NAME}" ]] || error "El agente AuraNode no está instalado. Instálalo primero antes de habilitar el modo privilegiado."
+  id -u "$SERVICE_USER" &>/dev/null || error "No existe el usuario ${SERVICE_USER}. ¿Está instalado el agente?"
+
+  # Guarda: el binario debe soportar el modo privilegiado (v1.5.0+). Un binario
+  # antiguo ignoraría el subcomando y arrancaría un agente normal como root.
+  if ! timeout 5 "${INSTALL_DIR}/${BINARY_NAME}" version 2>/dev/null | grep -q "privileged-capable"; then
+    error "Tu versión del agente no soporta el modo privilegiado. Actualízalo primero:
+  curl -fsSL https://get.auranode.app/agent | AURANODE_TOKEN=ant_xxx sudo -E bash"
+  fi
+
+  info "Habilitando el modo privilegiado acotado (helper root)..."
+  write_helper_unit
+  systemctl daemon-reload
+  systemctl enable --now "$HELPER_SERVICE"
+  # Reiniciar el agente para que detecte el socket y reporte 'disponible' al panel.
+  systemctl restart "$SERVICE_NAME" 2>/dev/null || true
+
+  echo ""
+  info "═══════════════════════════════════════════════"
+  info "✓ Modo privilegiado DISPONIBLE en este servidor"
+  info "═══════════════════════════════════════════════"
+  warn "Esto NO da root libre al panel. El helper SOLO ejecuta acciones de una"
+  warn "whitelist con argumentos validados (sin shell):"
+  echo "   • Actualizar índices de paquetes        (apt update)"
+  echo "   • Actualizar paquetes                    (apt upgrade)"
+  echo "   • Instalar paquete(s)                    (apt install <pkg>)"
+  echo "   • Limpiar paquetes huérfanos             (apt autoremove)"
+  echo "   • Estado/arrancar/parar/recargar/reiniciar servicios (systemctl)"
+  echo ""
+  warn "Guardas: no se puede gestionar el propio agente ni detener servicios"
+  warn "críticos (ssh, dbus, red, journald...). Toda acción queda auditada."
+  echo ""
+  info "Último paso: en el panel, el OWNER debe ACTIVAR el modo privilegiado para"
+  info "este servidor (con confirmación). Para revertir: re-ejecuta con --disable-privileged."
+}
+
+disable_privileged() {
+  info "Deshabilitando el modo privilegiado..."
+  systemctl disable --now "$HELPER_SERVICE" 2>/dev/null || true
+  rm -f "/etc/systemd/system/${HELPER_SERVICE}.service"
+  systemctl daemon-reload
+  systemctl restart "$SERVICE_NAME" 2>/dev/null || true
+  info "✓ Modo privilegiado deshabilitado. El helper root fue eliminado."
+}
 
 # ─── Pre-flight checks ─────────────────────────────────────────────────────────
 [[ "${EUID}" -ne 0 ]] && error "This script must be run as root (use sudo)."
@@ -35,6 +131,12 @@ error() { echo -e "${RED}[auranode] ERROR:${NC} $*" >&2; exit 1; }
 for cmd in curl tar sha256sum systemctl; do
   command -v "$cmd" >/dev/null 2>&1 || error "Required command not found: $cmd"
 done
+
+# Modos de gestión del helper privilegiado (no requieren token ni reinstalar).
+case "$MODE" in
+  enable-privileged)  enable_privileged;  exit 0 ;;
+  disable-privileged) disable_privileged; exit 0 ;;
+esac
 
 TOKEN="${AURANODE_TOKEN:-}"
 [[ -z "$TOKEN" ]] && error "AURANODE_TOKEN is not set. Get your token at https://panel.auranode.app"
@@ -155,3 +257,6 @@ info "  Status: systemctl status ${SERVICE_NAME}"
 info "  Logs:   journalctl -u ${SERVICE_NAME} -f"
 info "═══════════════════════════════════════════════"
 info "The server should appear in your panel within a few seconds."
+echo ""
+info "Optional — bounded privileged mode (apt/systemctl from the panel, NOT full root):"
+info "  curl -fsSL https://get.auranode.app/agent | sudo bash -s -- --enable-privileged"
