@@ -263,7 +263,16 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable --now "$SERVICE_NAME"
+systemctl enable "$SERVICE_NAME"
+# restart (no `enable --now`): en una actualización, `--now` solo arranca si está
+# parado y NO recarga el binario nuevo en un servicio ya activo. restart sí lo aplica.
+systemctl restart "$SERVICE_NAME"
+# Si el helper privilegiado está instalado, también corre el binario actualizado:
+# reiniciarlo para que tome la nueva versión.
+if systemctl list-unit-files "${HELPER_SERVICE}.service" >/dev/null 2>&1 \
+   && systemctl is-enabled "$HELPER_SERVICE" >/dev/null 2>&1; then
+  systemctl restart "$HELPER_SERVICE" 2>/dev/null || true
+fi
 
 echo ""
 info "═══════════════════════════════════════════════"
