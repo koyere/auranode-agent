@@ -16,6 +16,7 @@ import (
 	"github.com/koyere/auranode-agent/internal/connection"
 	"github.com/koyere/auranode-agent/internal/executor"
 	agentfs "github.com/koyere/auranode-agent/internal/fs"
+	"github.com/koyere/auranode-agent/internal/logs"
 	"github.com/koyere/auranode-agent/internal/migration"
 	"github.com/koyere/auranode-agent/internal/privileged"
 	"github.com/koyere/auranode-agent/internal/rules"
@@ -30,6 +31,7 @@ type Agent struct {
 	cfg        *agentcfg.Config
 	log        *zap.Logger
 	collector  *collector.Collector
+	logs       *logs.Collector
 	buf        *buffer.Buffer
 	engine     *rules.Engine
 	tunnels    *tunnel.Manager
@@ -67,6 +69,7 @@ func New(cfg *agentcfg.Config, log *zap.Logger) (*Agent, error) {
 		cfg:               cfg,
 		log:               log,
 		collector:         collector.New(log),
+		logs:              logs.New(log),
 		buf:               buf,
 		metricsInterval:   time.Duration(cfg.MetricsIntervalSeconds) * time.Second,
 		heartbeatInterval: time.Duration(cfg.HeartbeatIntervalSeconds) * time.Second,
@@ -124,6 +127,8 @@ func (a *Agent) OnConnect(ctx context.Context, sendFn func(any) error) {
 	a.tunnels.SetSend(sendFn)
 	a.terminals.SetSend(sendFn)
 	a.migrations.SetSend(sendFn)
+	a.logs.SetSend(sendFn)
+	a.logs.Start(ctx)
 
 	// 1. Send agent_info
 	info := a.collector.SystemInfo(a.cfg.Version)
@@ -158,6 +163,8 @@ func (a *Agent) OnDisconnect() {
 	a.tunnels.Shutdown()
 	a.terminals.SetSend(nil)
 	a.terminals.Shutdown()
+	a.logs.SetSend(nil)
+	a.logs.Stop()
 	// Migrations also cannot continue without the backend; they will be left INTERRUPTED.
 	a.migrations.SetSend(nil)
 	a.migrations.Shutdown()
@@ -179,6 +186,7 @@ func (a *Agent) OnConfig(cfg proto.AgentConfig) {
 	a.mu.Unlock()
 
 	a.engine.Sync(cfg.Rules)
+	a.logs.Configure(cfg.LogServices)
 }
 
 func (a *Agent) OnExec(cmd proto.ExecCommand) {

@@ -4,6 +4,26 @@ All notable versions of the AuraNode agent are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/) and
 [SemVer](https://semver.org/).
 
+## [1.6.0] — 2026-06-24
+
+### Added — System log collection (read-only)
+
+- **The agent now collects system logs and streams them to the panel.** It follows the
+  systemd journal (`journalctl -f -o json`), maps each entry to a service (unit) and a
+  level (from syslog priority), batches them and sends them to the backend, where they
+  appear under **Logs** in the dashboard (filterable by service and level). The backend
+  can narrow collection to specific units via the `log_services` config; empty means all.
+- **Read-only journal access, no privilege escalation.** The installer adds the
+  unprivileged `auranode` user to the **`systemd-journal`** group and sets
+  `SupplementaryGroups=systemd-journal` on the service. This grants **read** access to
+  the journal only — the agent is still not root, keeps `NoNewPrivileges`,
+  `ProtectSystem=strict` and an empty `CapabilityBoundingSet`. This is the standard
+  approach for monitoring agents.
+- **Graceful when unavailable.** On systems without `journalctl` (non-systemd) or
+  without journal access, the collector simply produces nothing — it never fails the
+  agent. To enable log collection on an existing install, re-run the installer
+  (`curl … | sudo bash`) so the group membership and updated unit are applied.
+
 ## [1.5.1] — 2026-06-24
 
 ### Added

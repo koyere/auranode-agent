@@ -196,6 +196,11 @@ if ! id -u "$SERVICE_USER" &>/dev/null; then
   info "Creating system user: ${SERVICE_USER}..."
   useradd --system --no-create-home --shell /usr/sbin/nologin "$SERVICE_USER"
 fi
+# Read-only access to the systemd journal so the agent can collect system logs
+# (standard for monitoring agents). This grants journal READ only, never root.
+if getent group systemd-journal >/dev/null 2>&1; then
+  usermod -aG systemd-journal "$SERVICE_USER" 2>/dev/null || true
+fi
 mkdir -p "$CONFIG_DIR" "$DATA_DIR" "$LOG_DIR"
 chown "${SERVICE_USER}:${SERVICE_USER}" "$DATA_DIR" "$LOG_DIR"
 chmod 750 "$CONFIG_DIR"
@@ -232,6 +237,9 @@ ExecStart=${INSTALL_DIR}/${BINARY_NAME}
 Restart=on-failure
 RestartSec=10s
 TimeoutStopSec=30s
+
+# Read-only journal access for log collection (no privilege escalation).
+SupplementaryGroups=systemd-journal
 
 # Hardening
 NoNewPrivileges=yes
