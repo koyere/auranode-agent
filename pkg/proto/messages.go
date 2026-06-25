@@ -77,6 +77,9 @@ type AgentInfo struct {
 	CPUCores   int    `json:"cpu_cores"`
 	TotalRAMMB int64  `json:"total_ram_mb"`
 	Kernel     string `json:"kernel"`
+	// MachineID is the host's stable identifier (Linux machine-id). It lets the panel
+	// detect the same server registered twice within a tenant.
+	MachineID string `json:"machine_id"`
 	// PrivilegedAvailable indica si el helper root está instalado en la VPS
 	// (modo privilegiado acotado disponible para activar desde el panel).
 	PrivilegedAvailable bool `json:"privileged_available"`

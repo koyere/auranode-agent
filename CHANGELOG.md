@@ -4,6 +4,18 @@ All notable versions of the AuraNode agent are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/) and
 [SemVer](https://semver.org/).
 
+## [1.8.0] — 2026-06-25
+
+### Added — Stable machine identity
+
+- **The agent now reports a stable host machine-id** (Linux machine-id, via gopsutil's
+  `HostID`). The panel uses it to detect when the same physical server has been registered
+  twice within the same account and shows a "Duplicate" hint. The identifier is only ever
+  compared within an account — never across accounts.
+
+To apply on an existing install, re-run the installer (`curl … | sudo bash`) or restart the
+service after updating the binary.
+
 ## [1.7.0] — 2026-06-24
 
 ### Fixed — Disk and log metric accuracy

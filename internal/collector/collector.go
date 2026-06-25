@@ -43,6 +43,7 @@ func (c *Collector) SystemInfo(version string) proto.AgentInfo {
 	if h, err := host.Info(); err == nil {
 		info.Hostname = h.Hostname
 		info.Kernel = h.KernelVersion
+		info.MachineID = h.HostID // stable host machine-id (Linux).
 	}
 
 	if counts, err := cpu.Counts(true); err == nil {
