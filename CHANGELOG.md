@@ -4,6 +4,23 @@ All notable versions of the AuraNode agent are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/) and
 [SemVer](https://semver.org/).
 
+## [1.10.0] — 2026-07-08
+
+### Added — SQL console (bounded)
+
+- **The agent can now run a single SQL statement** against a configured database connection
+  and stream the result back to the panel's SQL console. Hard limits protect the server:
+  30-second timeout, at most 1,000 rows and 1 MB per response (the agent truncates, not the
+  backend), and exactly one statement per execution (enforced by the driver's protocol, not
+  by parsing SQL).
+- **Read-only is enforced on the connection**, not by inspecting the query: developers and
+  shared-server operators always run in a read-only transaction; only the server owner's
+  admins get a read-write connection. Every query is audited server-side with the SQL that
+  ran.
+
+To apply on an existing install, re-run the installer (`curl … | sudo bash`) or restart the
+service after updating the binary.
+
 ## [1.9.0] — 2026-07-08
 
 ### Added — Database client (read-only exploration)

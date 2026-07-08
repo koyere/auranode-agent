@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -65,6 +66,8 @@ func (m *Manager) dispatch(req proto.DBRequest) (json.RawMessage, error) {
 		return m.databases(ctx, req.Conn, req.ReadOnly)
 	case proto.DBOpTables:
 		return m.tables(ctx, req.Conn, req.Database, req.ReadOnly)
+	case proto.DBOpQuery:
+		return m.query(ctx, req)
 	default:
 		return nil, fmt.Errorf("db: op no soportada: %q", req.Op)
 	}
@@ -153,6 +156,86 @@ func open(ctx context.Context, conn proto.DBConn, database string, readOnly bool
 		}
 	}
 	return db, nil
+}
+
+// ─── Consola SQL (D2) ─────────────────────────────────────────────────────────
+
+const (
+	dbQueryMaxRows  = 1000    // tope de filas devueltas (el agente trunca, no el backend)
+	dbQueryMaxBytes = 1 << 20 // 1 MiB de celdas por respuesta
+)
+
+// query ejecuta UN statement SQL en la conexión y devuelve las filas como texto. La
+// solo-lectura se impone en la conexión (readOnly, decisión C8), no parseando SQL. Un
+// solo statement por ejecución lo garantizan los drivers: pgx usa el protocolo extendido
+// y mysql no habilita multiStatements, así que ambos rechazan varios comandos. Los límites
+// (filas/bytes/timeout) protegen al VPS: el agente trunca, no el backend.
+func (m *Manager) query(ctx context.Context, req proto.DBRequest) (json.RawMessage, error) {
+	stmt := strings.TrimSpace(req.SQL)
+	if stmt == "" {
+		return nil, fmt.Errorf("db: SQL vacío")
+	}
+	maxRows := req.MaxRows
+	if maxRows <= 0 || maxRows > dbQueryMaxRows {
+		maxRows = dbQueryMaxRows
+	}
+
+	db, err := open(ctx, req.Conn, req.Database, req.ReadOnly)
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	start := time.Now()
+	rows, err := db.QueryContext(ctx, stmt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+	out := proto.DBQueryData{Columns: cols, Rows: [][]*string{}, ReadOnly: req.ReadOnly}
+
+	if len(cols) > 0 {
+		raw := make([]sql.RawBytes, len(cols))
+		scan := make([]any, len(cols))
+		for i := range raw {
+			scan[i] = &raw[i]
+		}
+		bytesUsed := 0
+		for rows.Next() {
+			if len(out.Rows) >= maxRows {
+				out.Truncated = true
+				break
+			}
+			if err := rows.Scan(scan...); err != nil {
+				return nil, err
+			}
+			row := make([]*string, len(cols))
+			for i := range raw {
+				if raw[i] == nil {
+					continue // NULL → null en el JSON
+				}
+				s := string(raw[i]) // copia: RawBytes deja de ser válido en el siguiente Next()
+				bytesUsed += len(s)
+				row[i] = &s
+			}
+			out.Rows = append(out.Rows, row)
+			if bytesUsed > dbQueryMaxBytes {
+				out.Truncated = true
+				break
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	}
+	out.RowsReturned = len(out.Rows)
+	out.DurationMS = time.Since(start).Milliseconds()
+	return marshal(out)
 }
 
 func marshal(v any) (json.RawMessage, error) {

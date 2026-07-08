@@ -59,6 +59,7 @@ const (
 	DBOpTest      = "test"      // probar una conexión con credenciales
 	DBOpDatabases = "databases" // listar BDs + estado del motor + usuarios/roles
 	DBOpTables    = "tables"    // listar tablas de una BD (tamaño, filas estimadas)
+	DBOpQuery     = "query"     // ejecutar un statement SQL acotado (D2, consola SQL)
 )
 
 // ─── File-manager operations (SFTP) ──────────────────────────────────────────
@@ -537,6 +538,8 @@ type DBRequest struct {
 	Conn      DBConn `json:"conn"`
 	Database  string `json:"database,omitempty"`  // BD objetivo (tables/query)
 	ReadOnly  bool   `json:"read_only,omitempty"` // impone solo-lectura en la conexión
+	SQL       string `json:"sql,omitempty"`       // op=query: statement único a ejecutar
+	MaxRows   int    `json:"max_rows,omitempty"`  // op=query: tope de filas devueltas (0 = por defecto)
 }
 
 // DBResponse: Agent → Backend. Resultado de una operación. Data lleva el payload
@@ -595,4 +598,16 @@ type DBTable struct {
 	Name      string `json:"name"`
 	SizeBytes int64  `json:"size_bytes"`
 	RowsEst   int64  `json:"rows_est"`
+}
+
+// DBQueryData es el resultado de la op query (consola SQL, D2). Rows lleva las celdas
+// como texto (NULL = null en el JSON) para no depender del tipo de columna. Un statement
+// que no devuelve filas (INSERT/UPDATE/DDL) llega con Columns vacío y RowsReturned=0.
+type DBQueryData struct {
+	Columns      []string   `json:"columns"`
+	Rows         [][]*string `json:"rows"`
+	RowsReturned int        `json:"rows_returned"`
+	Truncated    bool       `json:"truncated"`     // se alcanzó el tope de filas o de bytes
+	ReadOnly     bool       `json:"read_only"`     // la conexión se abrió en solo-lectura
+	DurationMS   int64      `json:"duration_ms"`
 }
