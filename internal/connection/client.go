@@ -43,6 +43,7 @@ type MessageHandler interface {
 	OnPTYData(msg proto.PTYData)
 	OnPTYResize(msg proto.PTYResize)
 	OnPTYClose(msg proto.PTYClose)
+	OnDB(req proto.DBRequest)
 	// OnMigration receives all migration_* messages (migration sub-protocol);
 	// the Manager does its own internal dispatch by type.
 	OnMigration(msgType string, raw []byte)
@@ -321,6 +322,12 @@ func (c *Client) dispatch(data []byte) {
 		var msg proto.PTYClose
 		if json.Unmarshal(data, &msg) == nil {
 			c.handler.OnPTYClose(msg)
+		}
+
+	case proto.TypeDBRequest:
+		var msg proto.DBRequest
+		if json.Unmarshal(data, &msg) == nil {
+			c.handler.OnDB(msg)
 		}
 
 	case proto.TypeAgentPing:

@@ -2,6 +2,8 @@
 // The types must stay in sync with backend/internal/websocket/messages.go.
 package proto
 
+import "encoding/json"
+
 // ─── Message types ────────────────────────────────────────────────────────────
 
 const (
@@ -43,6 +45,20 @@ const (
 	TypePTYData   = "pty_data"   // ambos sentidos (stdin backend→agente, stdout agente→backend)
 	TypePTYResize = "pty_resize" // backend→agente
 	TypePTYClose  = "pty_close"  // ambos sentidos
+
+	// ── Gestión de bases de datos (Parte 3 · D1+) ───────────────────────────────
+	// El agente actúa como cliente de BD (nunca admin del sistema): se conecta a los
+	// motores locales con drivers Go puros y responde detección/exploración/consulta.
+	TypeDBRequest  = "db_request"  // backend→agente
+	TypeDBResponse = "db_response" // agente→backend
+)
+
+// ─── Database ops ─────────────────────────────────────────────────────────────
+const (
+	DBOpDetect    = "detect"    // sondear motores locales (sin credenciales)
+	DBOpTest      = "test"      // probar una conexión con credenciales
+	DBOpDatabases = "databases" // listar BDs + estado del motor + usuarios/roles
+	DBOpTables    = "tables"    // listar tablas de una BD (tamaño, filas estimadas)
 )
 
 // ─── File-manager operations (SFTP) ──────────────────────────────────────────
@@ -499,3 +515,84 @@ type PTYClose struct {
 	Error     string `json:"error,omitempty"`
 }
 
+// ─── Database management (Parte 3 · D1+) ──────────────────────────────────────
+
+// DBConn son las credenciales/parámetros de una conexión a un motor local. Viajan
+// descifradas del backend al agente y son efímeras (nunca se persisten en el agente).
+type DBConn struct {
+	Engine   string `json:"engine"`         // postgres | mysql
+	Host     string `json:"host,omitempty"` // vacío + Socket → conexión por socket
+	Port     int    `json:"port,omitempty"`
+	User     string `json:"user,omitempty"`
+	Password string `json:"password,omitempty"`
+	Socket   string `json:"socket,omitempty"`    // ruta del socket unix local (C6)
+	UseLocal bool   `json:"use_local,omitempty"` // usar el acceso local del sistema (peer/socket)
+}
+
+// DBRequest: Backend → Agent. Una operación de base de datos.
+type DBRequest struct {
+	Envelope
+	RequestID string `json:"request_id"`
+	Op        string `json:"op"`
+	Conn      DBConn `json:"conn"`
+	Database  string `json:"database,omitempty"`  // BD objetivo (tables/query)
+	ReadOnly  bool   `json:"read_only,omitempty"` // impone solo-lectura en la conexión
+}
+
+// DBResponse: Agent → Backend. Resultado de una operación. Data lleva el payload
+// específico de la op en JSON (el backend lo reenvía al panel casi tal cual).
+type DBResponse struct {
+	Envelope
+	RequestID string          `json:"request_id"`
+	OK        bool            `json:"ok"`
+	Error     string          `json:"error,omitempty"`
+	Data      json.RawMessage `json:"data,omitempty"`
+}
+
+// ── Payloads de Data ──────────────────────────────────────────────────────────
+
+// DetectedEngine describe un motor encontrado en la máquina (op detect).
+type DetectedEngine struct {
+	Engine  string `json:"engine"`  // postgres | mysql | redis
+	Running bool   `json:"running"` // hay algo escuchando en el puerto/socket
+	Port    int    `json:"port,omitempty"`
+	Socket  string `json:"socket,omitempty"`
+	Version string `json:"version,omitempty"` // si se pudo leer (test/status)
+}
+
+// DBEngineStatus es el estado del motor (op databases).
+type DBEngineStatus struct {
+	Engine      string `json:"engine"`
+	Version     string `json:"version"`
+	UptimeSec   int64  `json:"uptime_sec,omitempty"`
+	Connections int    `json:"connections,omitempty"`
+}
+
+// DBInfo es una base de datos con su tamaño (op databases).
+type DBInfo struct {
+	Name      string `json:"name"`
+	SizeBytes int64  `json:"size_bytes"`
+}
+
+// DBUser es un usuario/rol del motor con un resumen de privilegios (op databases).
+type DBUser struct {
+	Name       string `json:"name"`
+	CanLogin   bool   `json:"can_login,omitempty"`
+	Superuser  bool   `json:"superuser,omitempty"`
+	Privileges string `json:"privileges,omitempty"` // resumen legible de grants
+}
+
+// DBDatabasesData es el payload de la op databases.
+type DBDatabasesData struct {
+	Status    DBEngineStatus `json:"status"`
+	Databases []DBInfo       `json:"databases"`
+	Users     []DBUser       `json:"users"`
+}
+
+// DBTable es una tabla con tamaño y filas estimadas (op tables).
+type DBTable struct {
+	Schema    string `json:"schema,omitempty"`
+	Name      string `json:"name"`
+	SizeBytes int64  `json:"size_bytes"`
+	RowsEst   int64  `json:"rows_est"`
+}

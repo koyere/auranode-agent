@@ -72,6 +72,7 @@ The agent is configured via environment variables (in `/etc/auranode/agent.env`)
 - Runs commands that **you** confirm in the panel (everything is recorded in the audit log).
 - Evaluates automation rules locally (offline-capable).
 - Supports tunnels/port-forwarding and VPS-to-VPS migrations.
+- Connects to local database engines as a client for read-only detection and exploration.
 
 ## Security
 

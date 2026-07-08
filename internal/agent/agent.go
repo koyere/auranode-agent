@@ -20,6 +20,7 @@ import (
 	"github.com/koyere/auranode-agent/internal/migration"
 	"github.com/koyere/auranode-agent/internal/privileged"
 	"github.com/koyere/auranode-agent/internal/rules"
+	"github.com/koyere/auranode-agent/internal/database"
 	"github.com/koyere/auranode-agent/internal/terminal"
 	"github.com/koyere/auranode-agent/internal/tunnel"
 	"github.com/koyere/auranode-agent/internal/updater"
@@ -36,6 +37,7 @@ type Agent struct {
 	engine     *rules.Engine
 	tunnels    *tunnel.Manager
 	terminals  *terminal.Manager
+	databases  *database.Manager
 	migrations *migration.Manager
 	updater    *updater.Updater
 	ws         *connection.Client
@@ -86,6 +88,7 @@ func New(cfg *agentcfg.Config, log *zap.Logger) (*Agent, error) {
 
 	a.tunnels = tunnel.New(log)
 	a.terminals = terminal.NewManager(log)
+	a.databases = database.NewManager(log)
 	a.migrations = migration.New(log, dirOf(cfg.DBPath))
 
 	// Updater check-and-notify: tells the backend when a newer version is available.
@@ -126,6 +129,7 @@ func (a *Agent) OnConnect(ctx context.Context, sendFn func(any) error) {
 	a.mu.Unlock()
 	a.tunnels.SetSend(sendFn)
 	a.terminals.SetSend(sendFn)
+	a.databases.SetSend(sendFn)
 	a.migrations.SetSend(sendFn)
 	a.logs.SetSend(sendFn)
 	a.logs.Start(ctx)
@@ -163,6 +167,7 @@ func (a *Agent) OnDisconnect() {
 	a.tunnels.Shutdown()
 	a.terminals.SetSend(nil)
 	a.terminals.Shutdown()
+	a.databases.SetSend(nil)
 	a.logs.SetSend(nil)
 	a.logs.Stop()
 	// Migrations also cannot continue without the backend; they will be left INTERRUPTED.
@@ -312,6 +317,10 @@ func (a *Agent) OnPTYStart(msg proto.PTYStart) {
 
 func (a *Agent) OnPTYData(msg proto.PTYData)   { a.terminals.Data(msg) }
 func (a *Agent) OnPTYResize(msg proto.PTYResize) { a.terminals.Resize(msg) }
+// OnDB atiende una operación de base de datos (Parte 3 · D1). El Manager responde
+// asíncronamente por el WS con un db_response.
+func (a *Agent) OnDB(req proto.DBRequest) { a.databases.Handle(req) }
+
 func (a *Agent) OnPTYClose(msg proto.PTYClose) {
 	a.log.Info("pty: close", zap.String("session_id", msg.SessionID))
 	a.terminals.Close(msg.SessionID)

@@ -41,9 +41,9 @@ for arg in "$@"; do
   esac
 done
 
-# write_helper_unit instala el unit del helper root. El helper corre como root y SIN
-# el endurecimiento del agente (necesita escribir el sistema: apt, systemctl), pero
-# solo ejecuta acciones de una whitelist con argumentos validados (no es sudo libre).
+# write_helper_unit installs the root helper unit. The helper runs as root and WITHOUT
+# the agent's hardening (it needs to write to the system: apt, systemctl), but it only
+# runs actions from a whitelist with validated arguments (it is NOT unrestricted sudo).
 write_helper_unit() {
   cat > "/etc/systemd/system/${HELPER_SERVICE}.service" <<EOF
 [Unit]
@@ -61,11 +61,11 @@ Restart=on-failure
 RestartSec=10s
 TimeoutStopSec=15s
 
-# El socket vive en /run/auranode (lo crea systemd, propiedad root).
+# The socket lives in /run/auranode (created by systemd, owned by root).
 RuntimeDirectory=auranode
 RuntimeDirectoryMode=0755
 
-# El helper SÍ necesita escalar para apt/systemctl (de ahí este unit separado).
+# The helper DOES need to escalate for apt/systemctl (hence this separate unit).
 NoNewPrivileges=no
 
 MemoryMax=512M
@@ -80,49 +80,49 @@ EOF
 }
 
 enable_privileged() {
-  [[ -x "${INSTALL_DIR}/${BINARY_NAME}" ]] || error "El agente AuraNode no está instalado. Instálalo primero antes de habilitar el modo privilegiado."
-  id -u "$SERVICE_USER" &>/dev/null || error "No existe el usuario ${SERVICE_USER}. ¿Está instalado el agente?"
+  [[ -x "${INSTALL_DIR}/${BINARY_NAME}" ]] || error "The AuraNode agent is not installed. Install it first before enabling privileged mode."
+  id -u "$SERVICE_USER" &>/dev/null || error "User ${SERVICE_USER} does not exist. Is the agent installed?"
 
-  # Guarda: el binario debe soportar el modo privilegiado (v1.5.0+). Un binario
-  # antiguo ignoraría el subcomando y arrancaría un agente normal como root.
+  # Guard: the binary must support privileged mode (v1.5.0+). An old binary would
+  # ignore the subcommand and start a normal agent as root.
   if ! timeout 5 "${INSTALL_DIR}/${BINARY_NAME}" version 2>/dev/null | grep -q "privileged-capable"; then
-    error "Tu versión del agente no soporta el modo privilegiado. Actualízalo primero:
+    error "Your agent version does not support privileged mode. Update it first:
   curl -fsSL https://get.auranode.app/agent | AURANODE_TOKEN=ant_xxx sudo -E bash"
   fi
 
-  info "Habilitando el modo privilegiado acotado (helper root)..."
+  info "Enabling bounded privileged mode (root helper)..."
   write_helper_unit
   systemctl daemon-reload
   systemctl enable --now "$HELPER_SERVICE"
-  # Reiniciar el agente para que detecte el socket y reporte 'disponible' al panel.
+  # Restart the agent so it detects the socket and reports 'available' to the panel.
   systemctl restart "$SERVICE_NAME" 2>/dev/null || true
 
   echo ""
   info "═══════════════════════════════════════════════"
-  info "✓ Modo privilegiado DISPONIBLE en este servidor"
+  info "✓ Privileged mode AVAILABLE on this server"
   info "═══════════════════════════════════════════════"
-  warn "Esto NO da root libre al panel. El helper SOLO ejecuta acciones de una"
-  warn "whitelist con argumentos validados (sin shell):"
-  echo "   • Actualizar índices de paquetes        (apt update)"
-  echo "   • Actualizar paquetes                    (apt upgrade)"
-  echo "   • Instalar paquete(s)                    (apt install <pkg>)"
-  echo "   • Limpiar paquetes huérfanos             (apt autoremove)"
-  echo "   • Estado/arrancar/parar/recargar/reiniciar servicios (systemctl)"
+  warn "This does NOT grant the panel full root. The helper ONLY runs actions from a"
+  warn "whitelist with validated arguments (no shell):"
+  echo "   • Refresh package indexes                (apt update)"
+  echo "   • Upgrade packages                       (apt upgrade)"
+  echo "   • Install package(s)                     (apt install <pkg>)"
+  echo "   • Remove orphaned packages               (apt autoremove)"
+  echo "   • Status/start/stop/reload/restart services (systemctl)"
   echo ""
-  warn "Guardas: no se puede gestionar el propio agente ni detener servicios"
-  warn "críticos (ssh, dbus, red, journald...). Toda acción queda auditada."
+  warn "Guards: it cannot manage the agent itself or stop critical services"
+  warn "(ssh, dbus, network, journald...). Every action is audited."
   echo ""
-  info "Último paso: en el panel, el OWNER debe ACTIVAR el modo privilegiado para"
-  info "este servidor (con confirmación). Para revertir: re-ejecuta con --disable-privileged."
+  info "Last step: in the panel, the OWNER must ENABLE privileged mode for this"
+  info "server (with confirmation). To revert: re-run with --disable-privileged."
 }
 
 disable_privileged() {
-  info "Deshabilitando el modo privilegiado..."
+  info "Disabling privileged mode..."
   systemctl disable --now "$HELPER_SERVICE" 2>/dev/null || true
   rm -f "/etc/systemd/system/${HELPER_SERVICE}.service"
   systemctl daemon-reload
   systemctl restart "$SERVICE_NAME" 2>/dev/null || true
-  info "✓ Modo privilegiado deshabilitado. El helper root fue eliminado."
+  info "✓ Privileged mode disabled. The root helper was removed."
 }
 
 # ─── Pre-flight checks ─────────────────────────────────────────────────────────
@@ -132,7 +132,7 @@ for cmd in curl tar sha256sum systemctl; do
   command -v "$cmd" >/dev/null 2>&1 || error "Required command not found: $cmd"
 done
 
-# Modos de gestión del helper privilegiado (no requieren token ni reinstalar).
+# Privileged helper management modes (no token or reinstall required).
 case "$MODE" in
   enable-privileged)  enable_privileged;  exit 0 ;;
   disable-privileged) disable_privileged; exit 0 ;;
@@ -264,11 +264,11 @@ EOF
 
 systemctl daemon-reload
 systemctl enable "$SERVICE_NAME"
-# restart (no `enable --now`): en una actualización, `--now` solo arranca si está
-# parado y NO recarga el binario nuevo en un servicio ya activo. restart sí lo aplica.
+# restart (not `enable --now`): on an update, `--now` only starts the service if it is
+# stopped and does NOT reload the new binary in an already-active service. restart does.
 systemctl restart "$SERVICE_NAME"
-# Si el helper privilegiado está instalado, también corre el binario actualizado:
-# reiniciarlo para que tome la nueva versión.
+# If the privileged helper is installed, it also runs the updated binary:
+# restart it so it picks up the new version.
 if systemctl list-unit-files "${HELPER_SERVICE}.service" >/dev/null 2>&1 \
    && systemctl is-enabled "$HELPER_SERVICE" >/dev/null 2>&1; then
   systemctl restart "$HELPER_SERVICE" 2>/dev/null || true

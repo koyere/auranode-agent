@@ -4,6 +4,25 @@ All notable versions of the AuraNode agent are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/) and
 [SemVer](https://semver.org/).
 
+## [1.9.0] — 2026-07-08
+
+### Added — Database client (read-only exploration)
+
+- **The agent can now connect to the local database engines as a client** to detect and
+  explore them from the panel. It uses pure-Go drivers (PostgreSQL via pgx, MySQL/MariaDB
+  via go-sql-driver) — it never administers the system and never runs as a database
+  superuser on your behalf. The feature is inert until you configure a connection in the
+  panel.
+- **Detection needs no credentials**: the agent probes the usual local engines over
+  loopback and unix sockets and reports only whether something is listening.
+- **Exploration is read-only**: with the credentials you provide (kept encrypted in the
+  panel and delivered to the agent only for the duration of a request, never stored on the
+  VPS), the agent lists databases with their size, tables with estimated rows, and the
+  engine's users/roles. Read-only is enforced at the session level on the connection.
+
+To apply on an existing install, re-run the installer (`curl … | sudo bash`) or restart the
+service after updating the binary.
+
 ## [1.8.0] — 2026-06-25
 
 ### Added — Stable machine identity
