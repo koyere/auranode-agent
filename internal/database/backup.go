@@ -35,10 +35,23 @@ func backupDir() string {
 }
 
 func enginePrefix(engine string) string {
-	if engine == "postgres" {
+	switch engine {
+	case "postgres":
 		return "pg"
+	case "mongodb":
+		return "mongo"
+	default:
+		return "my"
 	}
-	return "my"
+}
+
+// dumpSuffix es la extensión del archivo de dump según el motor. Mongo usa un archivo
+// de mongodump (--archive --gzip); el resto, SQL comprimido con gzip.
+func dumpSuffix(engine string) string {
+	if engine == "mongodb" {
+		return ".archive.gz"
+	}
+	return ".sql.gz"
 }
 
 // ─── Crear dump ───────────────────────────────────────────────────────────────
@@ -48,6 +61,9 @@ func (m *Manager) dump(ctx context.Context, req proto.DBRequest) (json.RawMessag
 	dbname := req.Database
 	if !validIdent(dbname) {
 		return nil, fmt.Errorf("db: nombre de base de datos no válido")
+	}
+	if conn.Engine == "mongodb" {
+		return m.dumpMongo(ctx, conn, dbname)
 	}
 	var tool string
 	switch conn.Engine {
@@ -67,7 +83,7 @@ func (m *Manager) dump(ctx context.Context, req proto.DBRequest) (json.RawMessag
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("db: no se pudo crear el directorio de backups: %w", err)
 	}
-	fname := fmt.Sprintf("%s_%s_%s.sql.gz", enginePrefix(conn.Engine), dbname, time.Now().Format("20060102-150405"))
+	fname := fmt.Sprintf("%s_%s_%s%s", enginePrefix(conn.Engine), dbname, time.Now().Format("20060102-150405"), dumpSuffix(conn.Engine))
 	full := filepath.Join(dir, fname)
 
 	args, env := dumpCommand(conn, dbname)
@@ -190,6 +206,9 @@ func (m *Manager) restore(ctx context.Context, req proto.DBRequest) (json.RawMes
 	if err != nil {
 		return nil, err
 	}
+	if conn.Engine == "mongodb" {
+		return m.restoreMongo(ctx, conn, dbname, full)
+	}
 	var tool string
 	switch conn.Engine {
 	case "postgres":
@@ -293,6 +312,126 @@ func restoreCommand(c proto.DBConn, dbname string) (args, env []string) {
 	return args, env
 }
 
+// ─── MongoDB (mongodump / mongorestore) ───────────────────────────────────────
+
+// mongoToolArgs construye los flags de conexión comunes a mongodump/mongorestore. La
+// contraseña va por un fichero de config temporal (0600) para NO exponerla en ps.
+func mongoToolArgs(c proto.DBConn) (args []string, cleanup func(), err error) {
+	cleanup = func() {}
+	if c.UseLocal || c.Socket != "" {
+		sock := c.Socket
+		if sock == "" {
+			sock = "/tmp/mongodb-27017.sock"
+		}
+		args = append(args, "--host="+sock)
+	} else {
+		host := c.Host
+		if host == "" {
+			host = "127.0.0.1"
+		}
+		port := c.Port
+		if port == 0 {
+			port = 27017
+		}
+		args = append(args, "--host="+host, "--port="+strconv.Itoa(port))
+	}
+	if c.User != "" {
+		args = append(args, "--username="+c.User, "--authenticationDatabase=admin")
+		if c.Password != "" {
+			f, e := os.CreateTemp("", "auranode-mongo-*.yaml")
+			if e != nil {
+				return nil, cleanup, e
+			}
+			path := f.Name()
+			_ = f.Chmod(0o600)
+			_, _ = f.WriteString("password: '" + strings.ReplaceAll(c.Password, "'", "''") + "'\n")
+			f.Close()
+			args = append(args, "--config="+path)
+			cleanup = func() { os.Remove(path) }
+		}
+	}
+	return args, cleanup, nil
+}
+
+func (m *Manager) dumpMongo(ctx context.Context, conn proto.DBConn, dbname string) (json.RawMessage, error) {
+	bin, err := exec.LookPath("mongodump")
+	if err != nil {
+		return nil, fmt.Errorf("db: mongodump no está instalado en el servidor")
+	}
+	dir := backupDir()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, err
+	}
+	fname := fmt.Sprintf("mongo_%s_%s.archive.gz", dbname, time.Now().Format("20060102-150405"))
+	full := filepath.Join(dir, fname)
+
+	cArgs, cleanup, err := mongoToolArgs(conn)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+	args := append([]string{"--db=" + dbname, "--archive=" + full, "--gzip", "--quiet"}, cArgs...)
+
+	cmd := exec.CommandContext(ctx, bin, args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	start := time.Now()
+	if err := cmd.Start(); err != nil {
+		os.Remove(full)
+		return nil, err
+	}
+	setNice(cmd.Process.Pid)
+	if err := cmd.Wait(); err != nil {
+		os.Remove(full)
+		return nil, fmt.Errorf("db: el dump falló: %s", strings.TrimSpace(shorten(stderr.String(), 4096)))
+	}
+	fi, err := os.Stat(full)
+	if err != nil {
+		return nil, err
+	}
+	return marshal(proto.DBDumpData{
+		File: fname, SizeBytes: fi.Size(), DurationMS: time.Since(start).Milliseconds(),
+		Message: fmt.Sprintf("Dump de %q creado (%s).", dbname, humanSize(fi.Size())),
+	})
+}
+
+func (m *Manager) restoreMongo(ctx context.Context, conn proto.DBConn, dbname, full string) (json.RawMessage, error) {
+	bin, err := exec.LookPath("mongorestore")
+	if err != nil {
+		return nil, fmt.Errorf("db: mongorestore no está instalado en el servidor")
+	}
+	_, srcDB := parseDumpName(filepath.Base(full))
+
+	cArgs, cleanup, err := mongoToolArgs(conn)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+	// --drop sustituye las colecciones que trae el archivo. Si la BD destino difiere de
+	// la del dump, se remapea el namespace.
+	args := []string{"--archive=" + full, "--gzip", "--drop", "--quiet"}
+	if srcDB != "" && srcDB != dbname {
+		args = append(args, "--nsFrom="+srcDB+".*", "--nsTo="+dbname+".*")
+	}
+	args = append(args, cArgs...)
+
+	cmd := exec.CommandContext(ctx, bin, args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	start := time.Now()
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	setNice(cmd.Process.Pid)
+	if err := cmd.Wait(); err != nil {
+		return nil, fmt.Errorf("db: la restauración falló: %s", strings.TrimSpace(shorten(stderr.String(), 4096)))
+	}
+	return marshal(proto.DBDumpData{
+		File: filepath.Base(full), DurationMS: time.Since(start).Milliseconds(),
+		Message: fmt.Sprintf("Base de datos %q restaurada desde %q.", dbname, filepath.Base(full)),
+	})
+}
+
 // ─── Listar / eliminar ────────────────────────────────────────────────────────
 
 func (m *Manager) dumps(_ proto.DBRequest) (json.RawMessage, error) {
@@ -306,7 +445,7 @@ func (m *Manager) dumps(_ proto.DBRequest) (json.RawMessage, error) {
 		return nil, err
 	}
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".sql.gz") {
+		if e.IsDir() || !isDumpFile(e.Name()) {
 			continue
 		}
 		fi, err := e.Info()
@@ -336,9 +475,14 @@ func (m *Manager) dumpDelete(req proto.DBRequest) (json.RawMessage, error) {
 
 // ─── Utilidades ───────────────────────────────────────────────────────────────
 
+// isDumpFile indica si el nombre es un dump reconocido (SQL comprimido o archivo de Mongo).
+func isDumpFile(name string) bool {
+	return strings.HasSuffix(name, ".sql.gz") || strings.HasSuffix(name, ".archive.gz")
+}
+
 // safeDumpPath valida que el nombre no escape del directorio de backups y que exista.
 func safeDumpPath(name string) (string, error) {
-	if name == "" || name != filepath.Base(name) || !strings.HasSuffix(name, ".sql.gz") {
+	if name == "" || name != filepath.Base(name) || !isDumpFile(name) {
 		return "", fmt.Errorf("db: nombre de dump no válido")
 	}
 	full := filepath.Join(backupDir(), name)
@@ -348,10 +492,10 @@ func safeDumpPath(name string) (string, error) {
 	return full, nil
 }
 
-// parseDumpName extrae (engine, database) de "<pg|my>_<db>_<ts>.sql.gz". El nombre de la
-// BD puede llevar guiones bajos; el prefijo y el timestamp son el primero y el último.
+// parseDumpName extrae (engine, database) de "<pg|my|mongo>_<db>_<ts>.<suf>". El nombre de
+// la BD puede llevar guiones bajos; el prefijo y el timestamp son el primero y el último.
 func parseDumpName(name string) (engine, db string) {
-	base := strings.TrimSuffix(name, ".sql.gz")
+	base := strings.TrimSuffix(strings.TrimSuffix(name, ".sql.gz"), ".archive.gz")
 	parts := strings.Split(base, "_")
 	if len(parts) < 3 {
 		return "", base
@@ -361,6 +505,8 @@ func parseDumpName(name string) (engine, db string) {
 		engine = "postgres"
 	case "my":
 		engine = "mysql"
+	case "mongo":
+		engine = "mongodb"
 	}
 	db = strings.Join(parts[1:len(parts)-1], "_")
 	return engine, db

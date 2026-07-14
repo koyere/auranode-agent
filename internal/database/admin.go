@@ -38,6 +38,8 @@ func (m *Manager) admin(ctx context.Context, req proto.DBRequest) (json.RawMessa
 		return m.adminPostgres(ctx, req.Conn, spec)
 	case "mysql":
 		return m.adminMySQL(ctx, req.Conn, spec)
+	case "mongodb":
+		return m.adminMongo(ctx, req.Conn, spec)
 	}
 	return nil, fmt.Errorf("db: motor no soportado: %q", req.Conn.Engine)
 }

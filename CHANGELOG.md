@@ -4,6 +4,24 @@ All notable versions of the AuraNode agent are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/) and
 [SemVer](https://semver.org/).
 
+## [1.12.0] — 2026-07-14
+
+### Added — MongoDB support (exploration, management and backups)
+
+- **MongoDB is now a supported engine.** The agent connects with the official Go driver to
+  explore it read-only (databases with size, collections with document count and storage
+  size, users/roles, and engine status: version, uptime, connections).
+- **Management:** create/drop a database (created lazily with an initial `data` collection),
+  create/drop a user, change a user's password, and grant/revoke basic roles (read /
+  readWrite / dbOwner) on a database. Names are validated; the driver parameterizes values.
+- **Backups:** compressed `mongodump`/`mongorestore` archives, integrated into the manual
+  and scheduled backup flows just like the SQL engines. Restore can remap the target
+  database. The database tools (`mongodump`/`mongorestore`) must be installed on the server.
+- Detection now also probes MongoDB on port 27017 (and the usual local sockets).
+
+As always the agent acts only as a database client — it never administers the operating
+system. To apply on an existing install, re-run the installer or restart the service.
+
 ## [1.11.0] — 2026-07-14
 
 ### Added — Database management, backups and Redis status

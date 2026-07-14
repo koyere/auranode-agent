@@ -152,6 +152,8 @@ func (m *Manager) test(ctx context.Context, conn proto.DBConn) (json.RawMessage,
 		return m.testPostgres(ctx, conn)
 	case "mysql":
 		return m.testMySQL(ctx, conn)
+	case "mongodb":
+		return m.testMongo(ctx, conn)
 	}
 	return nil, fmt.Errorf("db: motor no soportado: %q", conn.Engine)
 }
@@ -162,6 +164,8 @@ func (m *Manager) databases(ctx context.Context, conn proto.DBConn, readOnly boo
 		return m.databasesPostgres(ctx, conn, readOnly)
 	case "mysql":
 		return m.databasesMySQL(ctx, conn, readOnly)
+	case "mongodb":
+		return m.databasesMongo(ctx, conn) // Mongo explora en solo-lectura por diseño
 	}
 	return nil, fmt.Errorf("db: motor no soportado: %q", conn.Engine)
 }
@@ -172,6 +176,8 @@ func (m *Manager) tables(ctx context.Context, conn proto.DBConn, database string
 		return m.tablesPostgres(ctx, conn, database, readOnly)
 	case "mysql":
 		return m.tablesMySQL(ctx, conn, database, readOnly)
+	case "mongodb":
+		return m.tablesMongo(ctx, conn, database)
 	}
 	return nil, fmt.Errorf("db: motor no soportado: %q", conn.Engine)
 }

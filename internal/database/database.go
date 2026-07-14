@@ -109,6 +109,9 @@ func detect(ctx context.Context) []proto.DetectedEngine {
 	// Redis: solo estado (no exploración en D1); útil que aparezca como detectado.
 	out = append(out, probe("redis", 6379, []string{"/var/run/redis/redis-server.sock", "/run/redis/redis.sock"}))
 
+	// MongoDB: exploración + gestión + backups (mongodump).
+	out = append(out, probe("mongodb", 27017, []string{"/tmp/mongodb-27017.sock", "/var/run/mongodb/mongod.sock", "/run/mongodb/mongod.sock"}))
+
 	return out
 }
 

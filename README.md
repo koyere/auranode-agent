@@ -72,10 +72,10 @@ The agent is configured via environment variables (in `/etc/auranode/agent.env`)
 - Runs commands that **you** confirm in the panel (everything is recorded in the audit log).
 - Evaluates automation rules locally (offline-capable).
 - Supports tunnels/port-forwarding and VPS-to-VPS migrations.
-- Connects to local database engines as a client: read-only detection and exploration, a
-  bounded SQL console, basic management (create/drop databases and users, passwords,
-  grants), compressed backups (dump/restore) and Redis status — always as a SQL/Redis
-  client, never as an OS administrator.
+- Connects to local database engines as a client (PostgreSQL, MySQL/MariaDB, MongoDB, plus
+  Redis status): read-only detection and exploration, a bounded SQL console, basic
+  management (create/drop databases and users, passwords, grants), and compressed backups
+  (dump/restore) — always as a database client, never as an OS administrator.
 
 ## Security
 
