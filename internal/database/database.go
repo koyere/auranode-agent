@@ -54,7 +54,14 @@ func (m *Manager) Handle(req proto.DBRequest) {
 }
 
 func (m *Manager) dispatch(req proto.DBRequest) (json.RawMessage, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// Los dumps y restores pueden tardar bastante en BDs grandes: se les da un timeout
+	// mucho más amplio que a la exploración/consola.
+	timeout := 30 * time.Second
+	switch req.Op {
+	case proto.DBOpDump, proto.DBOpRestore:
+		timeout = dbBackupTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	switch req.Op {
@@ -68,6 +75,18 @@ func (m *Manager) dispatch(req proto.DBRequest) (json.RawMessage, error) {
 		return m.tables(ctx, req.Conn, req.Database, req.ReadOnly)
 	case proto.DBOpQuery:
 		return m.query(ctx, req)
+	case proto.DBOpAdmin:
+		return m.admin(ctx, req)
+	case proto.DBOpDump:
+		return m.dump(ctx, req)
+	case proto.DBOpDumps:
+		return m.dumps(req)
+	case proto.DBOpRestore:
+		return m.restore(ctx, req)
+	case proto.DBOpDumpDel:
+		return m.dumpDelete(req)
+	case proto.DBOpRedis:
+		return m.redisStatus(ctx, req.Conn)
 	default:
 		return nil, fmt.Errorf("db: op no soportada: %q", req.Op)
 	}

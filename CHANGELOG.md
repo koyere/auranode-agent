@@ -4,6 +4,34 @@ All notable versions of the AuraNode agent are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/) and
 [SemVer](https://semver.org/).
 
+## [1.11.0] — 2026-07-14
+
+### Added — Database management, backups and Redis status
+
+- **Management (create/drop, users, grants):** the agent can now run bounded administrative
+  actions against a configured connection — create/drop a database, create/drop a user,
+  change a user's password, and grant or revoke basic privileges (read-only, read/write, or
+  all). Identifiers are validated and quoted per engine before they touch a statement (DDL
+  cannot be parameterized), so database and user names can't be used to inject SQL;
+  passwords travel as a quoted literal and are never logged. On PostgreSQL a `revoke` also
+  reverses the default privileges left by a `grant`, so the role can then be dropped.
+- **Backups (dump / restore):** create a compressed dump of a database with the native
+  tools (`pg_dump` / `mysqldump`, gzip-compressed, run at low CPU priority) into a directory
+  on the server, list existing dumps, restore from one, and delete them. Dumps are
+  downloaded through the existing file manager. Restore file names are validated to stay
+  inside the backup directory.
+- **Redis status:** for a Redis connection the agent reports read-only status (version,
+  memory, total keys, connected clients, uptime) by speaking RESP directly — no key
+  browsing, no extra dependency.
+- **Authorization and audit:** management, dump, restore and delete are restricted to the
+  server owner's owner/admin roles; the panel additionally requires typing the exact name to
+  confirm any destructive action. Every action is audited (without the password). As always,
+  the agent acts only as a SQL/Redis client — it never administers the operating system.
+
+To apply on an existing install, re-run the installer (`curl … | sudo bash`) or restart the
+service after updating the binary. Dumps and restores require `pg_dump`/`mysqldump` and
+`psql`/`mysql` to be installed on the server.
+
 ## [1.10.0] — 2026-07-08
 
 ### Added — SQL console (bounded)

@@ -60,6 +60,30 @@ const (
 	DBOpDatabases = "databases" // listar BDs + estado del motor + usuarios/roles
 	DBOpTables    = "tables"    // listar tablas de una BD (tamaño, filas estimadas)
 	DBOpQuery     = "query"     // ejecutar un statement SQL acotado (D2, consola SQL)
+	DBOpAdmin     = "admin"     // gestión: crear/eliminar BD/usuario, contraseña, grants (D3)
+	DBOpDump      = "dump"       // crear un dump comprimido de una BD (D4, backups)
+	DBOpDumps     = "dumps"      // listar los dumps existentes (D4)
+	DBOpRestore   = "restore"    // restaurar una BD desde un dump (D4)
+	DBOpDumpDel   = "dump_delete" // eliminar un dump (D4)
+	DBOpRedis     = "redis"      // estado de Redis (INFO, memoria, nº de claves)
+)
+
+// ─── Database admin actions (op=admin, D3) ────────────────────────────────────
+const (
+	DBAdminCreateDatabase = "create_database" // crear una base de datos
+	DBAdminDropDatabase   = "drop_database"   // eliminar una base de datos
+	DBAdminCreateUser     = "create_user"     // crear un usuario/rol con login + contraseña
+	DBAdminDropUser       = "drop_user"       // eliminar un usuario/rol
+	DBAdminChangePassword = "change_password" // cambiar la contraseña de un usuario/rol
+	DBAdminGrant          = "grant"           // conceder privilegios básicos sobre una BD
+	DBAdminRevoke         = "revoke"          // revocar todos los privilegios sobre una BD
+)
+
+// Niveles de privilegio para grant (mapeados a grants concretos por motor).
+const (
+	DBPrivReadOnly  = "readonly"  // solo lectura (SELECT)
+	DBPrivReadWrite = "readwrite" // lectura + DML (SELECT/INSERT/UPDATE/DELETE)
+	DBPrivAll       = "all"       // todos los privilegios
 )
 
 // ─── File-manager operations (SFTP) ──────────────────────────────────────────
@@ -540,6 +564,18 @@ type DBRequest struct {
 	ReadOnly  bool   `json:"read_only,omitempty"` // impone solo-lectura en la conexión
 	SQL       string `json:"sql,omitempty"`       // op=query: statement único a ejecutar
 	MaxRows   int    `json:"max_rows,omitempty"`  // op=query: tope de filas devueltas (0 = por defecto)
+	Admin     *DBAdminSpec `json:"admin,omitempty"` // op=admin: acción de gestión (D3)
+	DumpFile  string `json:"dump_file,omitempty"` // op=restore/dump_delete: nombre del dump objetivo (D4)
+}
+
+// DBAdminSpec describe una acción de gestión (op=admin, D3). Los identificadores se
+// validan y se entrecomillan por motor en el agente (nunca se interpolan crudos).
+type DBAdminSpec struct {
+	Action    string `json:"action"`              // create_database|drop_database|create_user|drop_user|change_password|grant|revoke
+	Database  string `json:"database,omitempty"`  // BD objetivo (create/drop database, grant/revoke)
+	Username  string `json:"username,omitempty"`  // usuario/rol objetivo (create/drop user, change_password, grant/revoke)
+	Password  string `json:"password,omitempty"`  // create_user / change_password
+	Privilege string `json:"privilege,omitempty"` // grant: readonly|readwrite|all
 }
 
 // DBResponse: Agent → Backend. Resultado de una operación. Data lleva el payload
@@ -598,6 +634,46 @@ type DBTable struct {
 	Name      string `json:"name"`
 	SizeBytes int64  `json:"size_bytes"`
 	RowsEst   int64  `json:"rows_est"`
+}
+
+// DBAdminData es el resultado de la op admin (gestión, D3): un resumen legible de lo hecho.
+type DBAdminData struct {
+	Message string `json:"message"`
+}
+
+// DBDumpData es el resultado de la op dump (D4): metadatos del dump creado.
+type DBDumpData struct {
+	File       string `json:"file"`        // nombre del archivo (sin ruta)
+	SizeBytes  int64  `json:"size_bytes"`
+	DurationMS int64  `json:"duration_ms"`
+	Message    string `json:"message,omitempty"`
+}
+
+// DBDumpInfo describe un dump existente (op dumps, D4).
+type DBDumpInfo struct {
+	File         string `json:"file"`
+	Database     string `json:"database"`
+	Engine       string `json:"engine"`
+	SizeBytes    int64  `json:"size_bytes"`
+	ModifiedUnix int64  `json:"modified_unix"`
+	Path         string `json:"path"` // ruta absoluta (para descargar vía el módulo de archivos)
+}
+
+// DBDumpsData es el payload de la op dumps (D4).
+type DBDumpsData struct {
+	Dir   string       `json:"dir"`
+	Dumps []DBDumpInfo `json:"dumps"`
+}
+
+// DBRedisData es el estado de Redis (op redis): INFO + nº de claves. Solo lectura.
+type DBRedisData struct {
+	Version     string `json:"version"`
+	UptimeSec   int64  `json:"uptime_sec"`
+	Memory      string `json:"memory"`       // used_memory_human
+	MemoryBytes int64  `json:"memory_bytes"` // used_memory
+	Keys        int64  `json:"keys"`         // total de claves (todas las BDs)
+	Connections int64  `json:"connections"`  // connected_clients
+	Mode        string `json:"mode,omitempty"`
 }
 
 // DBQueryData es el resultado de la op query (consola SQL, D2). Rows lleva las celdas
