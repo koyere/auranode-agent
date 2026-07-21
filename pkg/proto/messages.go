@@ -20,6 +20,7 @@ const (
 	TypeAlert           = "alert"
 	TypeFSResponse      = "fs_response"
 	TypeUpdateAvailable = "update_available"
+	TypeSystemHealth    = "system_health" // snapshot de salud del sistema (baja frecuencia)
 	TypeSysActionResult = "sys_action_result" // resultado de una acción privilegiada
 	TypeError           = "error"
 
@@ -159,6 +160,18 @@ type UpdateAvailable struct {
 	Envelope
 	CurrentVersion string `json:"current_version"`
 	LatestVersion  string `json:"latest_version"`
+}
+
+// SystemHealth: Agent → Backend. Snapshot de baja frecuencia (en cada conexión y
+// cada hora) con señales de salud del sistema, todas de solo lectura. Los enteros
+// usan -1 para "no soportado/no medible" en esta plataforma (p. ej. sin apt-check).
+type SystemHealth struct {
+	Envelope
+	PendingUpdates  int  `json:"pending_updates"`  // paquetes actualizables (-1 = desconocido)
+	SecurityUpdates int  `json:"security_updates"` // de los cuales, de seguridad (-1 = desconocido)
+	RebootRequired  bool `json:"reboot_required"`  // /var/run/reboot-required existe
+	ZombieProcesses int  `json:"zombie_processes"` // procesos en estado Z
+	FailedUnits     int  `json:"failed_units"`     // units systemd en estado failed (-1 = desconocido)
 }
 
 type CPUMetrics struct {

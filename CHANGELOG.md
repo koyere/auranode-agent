@@ -4,6 +4,21 @@ All notable versions of the AuraNode agent are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/) and
 [SemVer](https://semver.org/).
 
+## [1.13.0] — 2026-07-21
+
+### Added — System health snapshot
+
+- **The agent now reports a low-frequency system health snapshot** (on connect and hourly),
+  surfaced per server in the panel. All signals are **read-only** — the agent never changes
+  system state:
+  - **Pending package updates** and how many are **security** updates (Debian/Ubuntu, via
+    `update-notifier`'s `apt-check`; skipped where unavailable).
+  - **Reboot required** (`/var/run/reboot-required`).
+  - **Zombie processes** count.
+  - **Failed systemd units** count (`systemctl list-units --state=failed`).
+
+To apply on an existing install, re-run the installer or restart the service.
+
 ## [1.12.1] — 2026-07-21
 
 ### Fixed — Fast reconnection after a network drop

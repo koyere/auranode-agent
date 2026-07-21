@@ -153,9 +153,33 @@ func (a *Agent) OnConnect(ctx context.Context, sendFn func(any) error) {
 	// 2. Flush the offline buffer if there are entries
 	go a.drainBuffer(ctx, sendFn)
 
-	// 3. Start the metrics and heartbeat loops
+	// 3. Start the metrics, heartbeat and system-health loops
 	go a.metricsLoop(ctx, sendFn)
 	go a.heartbeatLoop(ctx, sendFn)
+	go a.systemHealthLoop(ctx, sendFn)
+}
+
+// systemHealthLoop envía un snapshot de salud del sistema al conectar y luego cada hora.
+// Es de baja frecuencia porque sus fuentes (apt-check, systemctl) son más caras que las
+// métricas, y estas señales cambian despacio.
+func (a *Agent) systemHealthLoop(ctx context.Context, sendFn func(any) error) {
+	send := func() {
+		if err := sendFn(a.collector.SystemHealth()); err != nil {
+			a.log.Debug("system_health: envío falló", zap.Error(err))
+		}
+	}
+	send() // una vez al conectar
+
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			send()
+		}
+	}
 }
 
 func (a *Agent) OnDisconnect() {
