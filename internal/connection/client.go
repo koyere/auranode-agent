@@ -21,6 +21,11 @@ const (
 	baseBackoff  = 2 * time.Second
 	writeTimeout = 10 * time.Second
 	pongTimeout  = 60 * time.Second
+	// minHealthyUptime: si una conexión se mantuvo al menos este tiempo antes de caer,
+	// se considera "sana" y el backoff se reinicia, de modo que un agente que llevaba
+	// horas conectado reconecta enseguida (no tras el tope de 5 min). Solo el flapeo
+	// real (caídas seguidas) hace crecer el backoff.
+	minHealthyUptime = 60 * time.Second
 )
 
 // MessageHandler processes messages received from the backend.
@@ -96,9 +101,15 @@ func (c *Client) Run(ctx context.Context) {
 		default:
 		}
 
+		start := time.Now()
 		if err := c.connect(ctx); err != nil {
 			if ctx.Err() != nil {
 				return
+			}
+			// Si la conexión estuvo sana un buen rato antes de caer, esto es una caída
+			// puntual de red (no flapeo): reiniciar el backoff para reconectar enseguida.
+			if time.Since(start) >= minHealthyUptime {
+				attempt = 0
 			}
 			delay := backoff(attempt)
 			c.log.Warn("ws: disconnected, reintentando",

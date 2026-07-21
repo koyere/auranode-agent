@@ -4,6 +4,20 @@ All notable versions of the AuraNode agent are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/) and
 [SemVer](https://semver.org/).
 
+## [1.12.1] — 2026-07-21
+
+### Fixed — Fast reconnection after a network drop
+
+- **The agent now reconnects within seconds after a dropped WebSocket, instead of waiting
+  up to 5 minutes.** The reconnection backoff counter only reset on a clean shutdown, so
+  over the lifetime of a long-running agent it climbed to its 5-minute cap and stayed
+  there — meaning that after a brief network blip (common: NAT/proxy idle timeouts) the
+  panel showed the server as "offline" for a full 5 minutes before it came back. The
+  backoff now resets whenever a connection stayed healthy for at least a minute, so only
+  genuine flapping backs off; a stable agent that drops reconnects promptly.
+
+To apply on an existing install, re-run the installer or restart the service.
+
 ## [1.12.0] — 2026-07-14
 
 ### Added — MongoDB support (exploration, management and backups)
