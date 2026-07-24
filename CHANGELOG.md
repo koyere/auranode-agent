@@ -4,6 +4,23 @@ All notable versions of the AuraNode agent are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/) and
 [SemVer](https://semver.org/).
 
+## [1.13.1] — 2026-07-24
+
+### Fixed — Goroutine leak on reconnect
+
+- **The agent no longer leaks background workers each time the WebSocket reconnects.** The
+  metrics, heartbeat, system-health and log-tail loops were tied to the process lifetime
+  instead of the individual connection, so after every reconnect the old loops kept running
+  against the already-closed connection. On servers behind proxies/CDNs that recycle
+  long-lived WebSocket connections periodically, this accumulated one set of stale loops per
+  reconnect: the zombie metrics loops kept failing to send and pushing snapshots into the
+  offline buffer, pinning it at its cap and wasting CPU and memory over time (visibly close
+  to the service's memory limit on agents that reconnect often). Each connection now owns a
+  cancellable context, so its loops stop the moment that connection drops — reconnects are
+  cheap and leave nothing behind.
+
+To apply on an existing install, re-run the installer or restart the service.
+
 ## [1.13.0] — 2026-07-21
 
 ### Added — System health snapshot

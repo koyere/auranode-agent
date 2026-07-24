@@ -143,6 +143,15 @@ func (c *Client) connect(ctx context.Context) error {
 	}
 	defer conn.Close()
 
+	// Contexto por conexión: se cancela al cerrar esta conexión para que los
+	// loops que arranca OnConnect (metrics/heartbeat/system-health/logs) mueran
+	// junto con ella. Sin esto, cada reconexión dejaba goroutines zombis vivas
+	// con el sendFn viejo (conexión ya cerrada), que seguían empujando métricas
+	// al buffer offline → fuga de goroutines y saturación del buffer en agentes
+	// que reconectan a menudo.
+	connCtx, cancelConn := context.WithCancel(ctx)
+	defer cancelConn()
+
 	c.mu.Lock()
 	c.conn = conn
 	c.mu.Unlock()
@@ -167,7 +176,7 @@ func (c *Client) connect(ctx context.Context) error {
 		return conn.WriteMessage(websocket.TextMessage, data)
 	}
 
-	c.handler.OnConnect(ctx, sendFn)
+	c.handler.OnConnect(connCtx, sendFn)
 
 	// Drainer: writes everything that arrives on the channel
 	writeErr := make(chan error, 1)
