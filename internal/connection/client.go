@@ -21,6 +21,9 @@ const (
 	baseBackoff  = 2 * time.Second
 	writeTimeout = 10 * time.Second
 	pongTimeout  = 60 * time.Second
+	// File writes carry up to 6 MiB encoded as base64 (~8 MiB). Keep a small
+	// envelope margin while rejecting unbounded messages before JSON decoding.
+	maxInboundMessageBytes = 9 << 20
 	// minHealthyUptime: si una conexión se mantuvo al menos este tiempo antes de caer,
 	// se considera "sana" y el backoff se reinicia, de modo que un agente que llevaba
 	// horas conectado reconecta enseguida (no tras el tope de 5 min). Solo el flapeo
@@ -158,6 +161,7 @@ func (c *Client) connect(ctx context.Context) error {
 
 	c.log.Info("ws: conectado", zap.String("url", c.url))
 
+	conn.SetReadLimit(maxInboundMessageBytes)
 	conn.SetReadDeadline(time.Now().Add(pongTimeout))
 	conn.SetPongHandler(func(string) error {
 		conn.SetReadDeadline(time.Now().Add(pongTimeout))
@@ -185,7 +189,7 @@ func (c *Client) connect(ctx context.Context) error {
 		defer pingTicker.Stop()
 		for {
 			select {
-			case <-ctx.Done():
+			case <-connCtx.Done():
 				writeErr <- nil
 				return
 			case msg, ok := <-c.sendCh:
@@ -231,6 +235,9 @@ func (c *Client) connect(ctx context.Context) error {
 	case <-ctx.Done():
 		connErr = ctx.Err()
 	}
+	// Stop every per-connection goroutine before exposing the disconnect and
+	// starting a replacement connection.
+	cancelConn()
 
 	c.mu.Lock()
 	c.conn = nil

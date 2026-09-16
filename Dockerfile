@@ -1,11 +1,11 @@
 # AuraNode Agent — imagen mínima
 # Build: docker build -t auranode-agent .
 # Run:   docker run -d --name auranode-agent \
-#          -e AURANODE_TOKEN=ant_xxx \
+#          --env-file /etc/auranode-container.env \
 #          -v auranode-data:/var/lib/auranode \
 #          auranode-agent
 
-FROM golang:1.23-alpine AS build
+FROM golang:1.26.6-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download

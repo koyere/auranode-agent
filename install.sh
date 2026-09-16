@@ -4,7 +4,8 @@
 # Documentation: https://docs.auranode.app/agent/install
 #
 # Usage:
-#   curl -fsSL https://get.auranode.app/agent | AURANODE_TOKEN=ant_xxx sudo -E bash
+#   curl -fsSL https://get.auranode.app/agent | sudo bash
+#   (the installer reads the server credential silently from /dev/tty)
 #
 # The binary is verified with SHA256 against the release's checksums.txt on GitHub.
 
@@ -87,7 +88,7 @@ enable_privileged() {
   # ignore the subcommand and start a normal agent as root.
   if ! timeout 5 "${INSTALL_DIR}/${BINARY_NAME}" version 2>/dev/null | grep -q "privileged-capable"; then
     error "Your agent version does not support privileged mode. Update it first:
-  curl -fsSL https://get.auranode.app/agent | AURANODE_TOKEN=ant_xxx sudo -E bash"
+  curl -fsSL https://get.auranode.app/agent | sudo bash"
   fi
 
   info "Enabling bounded privileged mode (root helper)..."
@@ -146,7 +147,15 @@ if [[ -z "$TOKEN" && -f "$ENV_FILE" ]]; then
   TOKEN="$(grep -oP '^AURANODE_TOKEN=\K.*' "$ENV_FILE" 2>/dev/null || true)"
   [[ -n "$TOKEN" ]] && info "Reusing the token already stored on this server (update mode)."
 fi
-[[ -z "$TOKEN" ]] && error "AURANODE_TOKEN is not set. Get your token at https://panel.auranode.app"
+if [[ -z "$TOKEN" && -r /dev/tty ]]; then
+  # Read from the controlling terminal, not stdin: stdin contains this installer
+  # when invoked through curl | bash. The secret is neither echoed nor written to
+  # shell history.
+  printf "Enter the server token from https://panel.auranode.app: " > /dev/tty
+  IFS= read -r -s TOKEN < /dev/tty || true
+  printf "\n" > /dev/tty
+fi
+[[ -z "$TOKEN" ]] && error "No server token was provided. Run interactively or set AURANODE_TOKEN in a protected automation environment."
 if ! echo "$TOKEN" | grep -qE '^ant_[A-Za-z0-9_-]{32,}$'; then
   error "Invalid token format. Check the token in your AuraNode panel."
 fi

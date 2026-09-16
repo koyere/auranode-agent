@@ -4,6 +4,25 @@ All notable versions of the AuraNode agent are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/) and
 [SemVer](https://semver.org/).
 
+## [1.13.2] — 2026-09-16
+
+### Security
+
+- Build and release with Go 1.26.6 and update PostgreSQL, MongoDB, compression and Go
+  support modules to patched versions. Releases now require tests, `go vet`, the race
+  detector, ShellCheck and `govulncheck` to pass before publication.
+- Bound remote-command output while it is produced, cap command duration and concurrency,
+  and kill the whole process group on timeout so descendants cannot survive.
+- Limit inbound WebSocket messages and migration chunk/window sizes; reject negative file
+  sizes and chunks that exceed either the per-message limit or the declared file size.
+- Build IPv4, hostname and IPv6 tunnel addresses with `net.JoinHostPort`.
+
+### Fixed
+
+- Stop per-connection WebSocket writer goroutines immediately on disconnect.
+- The installer now reads a new server token silently from `/dev/tty`, preventing the
+  credential from being copied into shell history by the recommended install command.
+
 ## [1.13.1] — 2026-07-24
 
 ### Fixed — Goroutine leak on reconnect

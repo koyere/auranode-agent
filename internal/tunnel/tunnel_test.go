@@ -253,3 +253,20 @@ func TestSlowConsumerBackpressure(t *testing.T) {
 }
 
 func itoa(p int) string { return strconv.Itoa(p) }
+
+func TestTCPAddressSupportsIPv6(t *testing.T) {
+	tests := []struct {
+		host string
+		port int
+		want string
+	}{
+		{host: "127.0.0.1", port: 8080, want: "127.0.0.1:8080"},
+		{host: "localhost", port: 443, want: "localhost:443"},
+		{host: "::1", port: 5432, want: "[::1]:5432"},
+	}
+	for _, tt := range tests {
+		if got := tcpAddress(tt.host, tt.port); got != tt.want {
+			t.Errorf("tcpAddress(%q, %d) = %q, want %q", tt.host, tt.port, got, tt.want)
+		}
+	}
+}

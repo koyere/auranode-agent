@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -35,9 +36,13 @@ import (
 )
 
 const (
-	progressInterval = 5 * time.Second
-	maxFileRetries   = 3
-	windowAckEvery   = 1 << 20 // emit window_ack every ~1MB written
+	progressInterval   = 5 * time.Second
+	maxFileRetries     = 3
+	windowAckEvery     = 1 << 20 // emit window_ack every ~1MB written
+	defaultChunkSize   = 1 << 20
+	maxChunkSize       = 4 << 20
+	defaultWindowBytes = 8 << 20
+	maxWindowBytes     = 64 << 20
 )
 
 // Manager manages the agent's migration sessions (it can be source of one and
@@ -200,11 +205,18 @@ func (m *Manager) startSource(msg proto.MigrationMsg) {
 
 	chunkSize := msg.ChunkSize
 	if chunkSize <= 0 {
-		chunkSize = 1 << 20
+		chunkSize = defaultChunkSize
+	} else if chunkSize > maxChunkSize {
+		chunkSize = maxChunkSize
 	}
 	window := msg.WindowBytes
 	if window <= 0 {
-		window = 8 << 20
+		window = defaultWindowBytes
+	} else if window > maxWindowBytes {
+		window = maxWindowBytes
+	}
+	if window < int64(chunkSize) {
+		window = int64(chunkSize)
 	}
 
 	// Resume set: files already completed on the destination (path→size+mtime).
@@ -235,12 +247,10 @@ func (m *Manager) startSource(msg proto.MigrationMsg) {
 		bytesTotal += f.info.Size()
 	}
 
-	var (
-		bytesTransferred int64
-		filesCompleted   int
-		warnings         []proto.MigrationWarning
-		fileID           uint32
-	)
+	var bytesTransferred atomic.Int64
+	var filesCompleted atomic.Int64
+	var warnings []proto.MigrationWarning
+	var fileID uint32
 
 	// Periodic progress report.
 	stopProgress := make(chan struct{})
@@ -256,8 +266,8 @@ func (m *Manager) startSource(msg proto.MigrationMsg) {
 
 		// Resume/delta: skip if already complete (same size+mtime).
 		if c, ok := completed[f.rel]; ok && c.Size == f.info.Size() && c.Mtime == f.info.ModTime().Unix() {
-			bytesTransferred += f.info.Size()
-			filesCompleted++
+			bytesTransferred.Add(f.info.Size())
+			filesCompleted.Add(1)
 			continue
 		}
 
@@ -271,7 +281,7 @@ func (m *Manager) startSource(msg proto.MigrationMsg) {
 			warnings = append(warnings, *warn)
 		}
 		if ok {
-			filesCompleted++
+			filesCompleted.Add(1)
 		}
 	}
 
@@ -284,15 +294,15 @@ func (m *Manager) startSource(msg proto.MigrationMsg) {
 		MigrationID:      msg.MigrationID,
 		Status:           status,
 		Warnings:         warnings,
-		BytesTransferred: bytesTransferred,
-		FilesCompleted:   filesCompleted,
+		BytesTransferred: bytesTransferred.Load(),
+		FilesCompleted:   int(filesCompleted.Load()),
 	})
 }
 
 // sendFile sends a whole file with flow control and retries. Returns
 // (ok, warning, errFatal). ok=false with a warning if the file changed/disappeared.
 func (m *Manager) sendFile(s *srcSession, migID, abs, rel string, info os.FileInfo, fileID uint32,
-	chunkSize int, window int64, bytesTransferred *int64) (bool, *proto.MigrationWarning, error) {
+	chunkSize int, window int64, bytesTransferred *atomic.Int64) (bool, *proto.MigrationWarning, error) {
 
 	for attempt := 0; attempt < maxFileRetries; attempt++ {
 		// Drain stale acks from a previous attempt.
@@ -330,7 +340,7 @@ func (m *Manager) sendFile(s *srcSession, migID, abs, rel string, info os.FileIn
 			},
 		})
 
-		startBytes := *bytesTransferred
+		startBytes := bytesTransferred.Load()
 		sentErr := m.streamChunks(s, migID, f, fileID, chunkSize, window, startBytes, bytesTransferred)
 		f.Close()
 		if sentErr != nil {
@@ -351,7 +361,7 @@ func (m *Manager) sendFile(s *srcSession, migID, abs, rel string, info os.FileIn
 				return true, nil, nil
 			}
 			// Verification failed: retry the file (rewind the counter).
-			*bytesTransferred = startBytes
+			bytesTransferred.Store(startBytes)
 			m.log.Warn("migration: archivo rechazado por el destino, reintentando",
 				zap.String("file", rel), zap.Int("attempt", attempt+1))
 		case <-time.After(2 * time.Minute):
@@ -364,7 +374,7 @@ func (m *Manager) sendFile(s *srcSession, migID, abs, rel string, info os.FileIn
 
 // streamChunks sends a file's chunks respecting the flow-control window.
 func (m *Manager) streamChunks(s *srcSession, migID string, f *os.File, fileID uint32,
-	chunkSize int, window int64, startBytes int64, bytesTransferred *int64) error {
+	chunkSize int, window int64, startBytes int64, bytesTransferred *atomic.Int64) error {
 
 	buf := make([]byte, chunkSize)
 	var offset int64
@@ -396,7 +406,7 @@ func (m *Manager) streamChunks(s *srcSession, migID string, f *os.File, fileID u
 				CRC32: crc32.ChecksumIEEE(chunk),
 			})
 			offset += int64(n)
-			*bytesTransferred = startBytes + offset
+			bytesTransferred.Store(startBytes + offset)
 		}
 		if err == io.EOF {
 			return nil
@@ -446,8 +456,8 @@ func (m *Manager) srcWindowAck(msg proto.MigrationMsg) {
 	}
 }
 
-func (m *Manager) progressLoop(s *srcSession, migID string, bytesTransferred *int64, bytesTotal int64,
-	filesCompleted *int, filesTotal int, stop chan struct{}) {
+func (m *Manager) progressLoop(s *srcSession, migID string, bytesTransferred *atomic.Int64, bytesTotal int64,
+	filesCompleted *atomic.Int64, filesTotal int, stop chan struct{}) {
 	t := time.NewTicker(progressInterval)
 	defer t.Stop()
 	var lastBytes int64
@@ -459,7 +469,7 @@ func (m *Manager) progressLoop(s *srcSession, migID string, bytesTransferred *in
 		case <-stop:
 			return
 		case now := <-t.C:
-			cur := *bytesTransferred
+			cur := bytesTransferred.Load()
 			elapsed := now.Sub(last).Seconds()
 			var speed int64
 			if elapsed > 0 {
@@ -470,7 +480,7 @@ func (m *Manager) progressLoop(s *srcSession, migID string, bytesTransferred *in
 				Envelope:         proto.Envelope{Type: proto.TypeMigrationProgress, Timestamp: now.Unix()},
 				MigrationID:      migID,
 				BytesTransferred: cur,
-				FilesCompleted:   *filesCompleted,
+				FilesCompleted:   int(filesCompleted.Load()),
 				SpeedBytesPerSec: speed,
 			})
 		}
@@ -496,9 +506,9 @@ type dstSession struct {
 	completed map[string]proto.MigrationFileInfo
 
 	// File in progress.
-	curFileID uint32
-	curRel    string
-	curPath   string
+	curFileID  uint32
+	curRel     string
+	curPath    string
 	curFile    *os.File
 	curInfo    proto.MigrationFileInfo
 	curHash    hash.Hash
@@ -532,7 +542,7 @@ func (d *dstSession) recordCompleted(info proto.MigrationFileInfo) {
 		return
 	}
 	d.manifestFile.Write(append(line, '\n')) //nolint:errcheck
-	d.manifestFile.Sync()                     //nolint:errcheck
+	d.manifestFile.Sync()                    //nolint:errcheck
 }
 
 func (m *Manager) prepare(msg proto.MigrationMsg) {
@@ -634,7 +644,22 @@ func (m *Manager) dstFile(msg proto.MigrationMsg) {
 	// Close any previous unfinished file.
 	if d.curFile != nil {
 		d.curFile.Close()
-		d.curFile = nil
+	}
+	// Reset the state to the incoming file before validating its metadata. This
+	// ensures migration_file_done receives a negative ACK for an invalid header
+	// instead of being ignored because the previous file ID is still active.
+	d.curFileID = msg.FileID
+	d.curRel = ""
+	d.curPath = ""
+	d.curFile = nil
+	d.curInfo = *msg.File
+	d.curHash = nil
+	d.curWritten = 0
+	d.curAcked = 0
+	d.curBroken = true
+	if msg.File.Size < 0 {
+		m.log.Warn("migration: tamaño de archivo inválido", zap.Int64("size", msg.File.Size))
+		return
 	}
 
 	dest, ok := safeJoin(d.destPath, msg.File.Path)
@@ -658,10 +683,7 @@ func (m *Manager) dstFile(msg proto.MigrationMsg) {
 	d.curRel = msg.File.Path
 	d.curPath = dest
 	d.curFile = f
-	d.curInfo = *msg.File
 	d.curHash = sha256.New()
-	d.curWritten = 0
-	d.curAcked = 0
 	d.curBroken = false
 }
 
@@ -676,10 +698,27 @@ func (m *Manager) dstChunk(msg proto.MigrationMsg) {
 		return
 	}
 
+	if len(msg.Data) > base64.StdEncoding.EncodedLen(maxChunkSize) {
+		d.curBroken = true
+		m.log.Warn("migration: chunk excede el límite", zap.Int("encoded_bytes", len(msg.Data)))
+		return
+	}
 	raw, err := base64.StdEncoding.DecodeString(msg.Data)
 	if err != nil || crc32.ChecksumIEEE(raw) != msg.CRC32 {
 		// Corrupt chunk: mark the file as broken; verification will fail → resend.
 		d.curBroken = true
+		return
+	}
+	if len(raw) > maxChunkSize {
+		d.curBroken = true
+		m.log.Warn("migration: chunk decodificado excede el límite", zap.Int("bytes", len(raw)))
+		return
+	}
+	if d.curWritten+int64(len(raw)) > d.curInfo.Size {
+		d.curBroken = true
+		m.log.Warn("migration: chunk excede el tamaño declarado",
+			zap.Int64("declared", d.curInfo.Size),
+			zap.Int64("received", d.curWritten+int64(len(raw))))
 		return
 	}
 	if _, err := d.curFile.Write(raw); err != nil {

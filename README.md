@@ -17,10 +17,14 @@ the intelligent multi-VPS control platform.
 ## Installation
 
 ```bash
-curl -fsSL https://get.auranode.app/agent | AURANODE_TOKEN=ant_xxx sudo -E bash
+curl -fsSL https://get.auranode.app/agent | sudo bash
 ```
 
 Get your token by registering a server at [panel.auranode.app](https://panel.auranode.app).
+The installer asks for it silently through the controlling terminal, so the credential is
+not stored in shell history or exposed as a command-line argument. The token is a long-lived,
+rotatable server credential; protect it like a password until it is rotated or the server is
+deleted.
 The installer downloads the binary from the latest release, **verifies its SHA256**
 against `checksums.txt`, and installs the agent as an unprivileged systemd service.
 
@@ -43,10 +47,17 @@ Then set `AURANODE_TOKEN` in `/etc/auranode/agent.env` and create the systemd se
 
 ### Docker
 
+Create a root-readable environment file without putting the token in shell history:
+
+```bash
+sudo install -m 600 -o root -g root /dev/null /etc/auranode-container.env
+sudo bash -c 'IFS= read -r -s -p "AuraNode server token: " token < /dev/tty; printf "\n" > /dev/tty; printf "AURANODE_TOKEN=%s\n" "$token" > /etc/auranode-container.env; unset token'
+```
+
 ```bash
 docker run -d --name auranode-agent --restart unless-stopped \
   --pid host --network host \
-  -e AURANODE_TOKEN=ant_xxx \
+  --env-file /etc/auranode-container.env \
   -v auranode-data:/var/lib/auranode \
   ghcr.io/koyere/auranode-agent:latest
 ```

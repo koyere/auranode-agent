@@ -14,8 +14,8 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
-	"fmt"
 	"net"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -38,6 +38,10 @@ const (
 	// the overflow reset remains a safety net (bytes are NEVER dropped).
 	inboxBuffer = 2048
 )
+
+func tcpAddress(host string, port int) string {
+	return net.JoinHostPort(host, strconv.Itoa(port))
+}
 
 // Manager manages the agent's listeners and streams.
 type Manager struct {
@@ -193,7 +197,7 @@ func (m *Manager) StartListener(tunnelID string, localPort int, bindAddr string)
 	if bindAddr == "" {
 		bindAddr = "127.0.0.1"
 	}
-	addr := fmt.Sprintf("%s:%d", bindAddr, localPort)
+	addr := tcpAddress(bindAddr, localPort)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		m.log.Warn("tunnel: could not open listener",
@@ -313,7 +317,7 @@ func (m *Manager) OpenDest(tunnelID, streamID, host string, port int, peerFC boo
 	m.register(s)
 
 	go func() {
-		addr := fmt.Sprintf("%s:%d", host, port)
+		addr := tcpAddress(host, port)
 		conn, err := net.DialTimeout("tcp", addr, dialTimeout)
 		if err != nil {
 			m.log.Warn("tunnel: dial to destination failed",
