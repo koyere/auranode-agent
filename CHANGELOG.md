@@ -4,6 +4,17 @@ All notable versions of the AuraNode agent are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/) and
 [SemVer](https://semver.org/).
 
+## [1.13.3] — 2026-11-19
+
+### Security
+
+- Build and release with Go 1.27.4, which fixes the standard-library vulnerabilities
+  that `govulncheck` reports for Go 1.26.x.
+- Update the PostgreSQL, MySQL, MongoDB, bbolt, zap, compression and `golang.org/x`
+  modules to their latest patched versions. `govulncheck` reports no known vulnerabilities.
+- Container images now use the Debian 13 distroless base, and the release workflow runs
+  on the current major versions of its GitHub Actions.
+
 ## [1.13.2] — 2026-09-16
 
 ### Security

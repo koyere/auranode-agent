@@ -30,6 +30,120 @@ type relayBus struct {
 	prep chan proto.MigrationMsg
 }
 
+func preparedDestination(t *testing.T) (*Manager, *dstSession, string) {
+	t.Helper()
+	m := New(zap.NewNop(), t.TempDir())
+	m.SetSend(func(any) error { return nil })
+	dest := filepath.Join(t.TempDir(), "destination")
+	m.prepare(proto.MigrationMsg{MigrationID: "mig_limits", DestPath: dest})
+	d := m.dstSession("mig_limits")
+	if d == nil {
+		t.Fatal("destination session was not prepared")
+	}
+	t.Cleanup(d.close)
+	return m, d, dest
+}
+
+func TestDestinationRejectsNegativeFileSize(t *testing.T) {
+	m, d, dest := preparedDestination(t)
+	acks := make(chan proto.MigrationMsg, 1)
+	m.SetSend(func(msg any) error {
+		if ack, ok := msg.(proto.MigrationMsg); ok && ack.Type == proto.TypeMigrationFileAck {
+			acks <- ack
+		}
+		return nil
+	})
+	m.dstFile(proto.MigrationMsg{MigrationID: "mig_limits", FileID: 1,
+		File: &proto.MigrationFileInfo{Path: "previous.bin", Size: 1}})
+	m.dstFile(proto.MigrationMsg{MigrationID: "mig_limits", FileID: 2,
+		File: &proto.MigrationFileInfo{Path: "negative.bin", Size: -1}})
+
+	d.mu.Lock()
+	broken, open, fileID := d.curBroken, d.curFile != nil, d.curFileID
+	d.mu.Unlock()
+	if !broken || open || fileID != 2 {
+		t.Fatalf("negative size state: broken=%v open=%v fileID=%d", broken, open, fileID)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "negative.bin")); !os.IsNotExist(err) {
+		t.Fatalf("negative-sized file was created: %v", err)
+	}
+	m.dstFileDone(proto.MigrationMsg{MigrationID: "mig_limits", FileID: 2})
+	select {
+	case ack := <-acks:
+		if ack.OK {
+			t.Fatal("negative-sized file received a successful ACK")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("negative-sized file did not receive a failure ACK")
+	}
+}
+
+func TestDestinationRejectsChunkLargerThanLimit(t *testing.T) {
+	m, d, dest := preparedDestination(t)
+	m.dstFile(proto.MigrationMsg{MigrationID: "mig_limits", FileID: 1,
+		File: &proto.MigrationFileInfo{Path: "large.bin", Size: int64(maxChunkSize + 1)}})
+	raw := make([]byte, maxChunkSize+1)
+	m.dstChunk(proto.MigrationMsg{MigrationID: "mig_limits", FileID: 1,
+		Data: base64.StdEncoding.EncodeToString(raw), CRC32: crc32.ChecksumIEEE(raw)})
+
+	d.mu.Lock()
+	broken := d.curBroken
+	d.mu.Unlock()
+	if !broken {
+		t.Fatal("oversized chunk was accepted")
+	}
+	info, err := os.Stat(filepath.Join(dest, "large.bin"))
+	if err != nil {
+		t.Fatalf("stat large.bin: %v", err)
+	}
+	if info.Size() != 0 {
+		t.Fatalf("oversized chunk wrote %d bytes", info.Size())
+	}
+}
+
+func TestDestinationAcceptsChunkAtLimit(t *testing.T) {
+	m, d, dest := preparedDestination(t)
+	m.dstFile(proto.MigrationMsg{MigrationID: "mig_limits", FileID: 1,
+		File: &proto.MigrationFileInfo{Path: "at-limit.bin", Size: int64(maxChunkSize)}})
+	raw := make([]byte, maxChunkSize)
+	m.dstChunk(proto.MigrationMsg{MigrationID: "mig_limits", FileID: 1,
+		Data: base64.StdEncoding.EncodeToString(raw), CRC32: crc32.ChecksumIEEE(raw)})
+
+	d.mu.Lock()
+	broken, written := d.curBroken, d.curWritten
+	d.mu.Unlock()
+	if broken || written != int64(maxChunkSize) {
+		t.Fatalf("chunk at limit: broken=%v written=%d", broken, written)
+	}
+	info, err := os.Stat(filepath.Join(dest, "at-limit.bin"))
+	if err != nil || info.Size() != int64(maxChunkSize) {
+		t.Fatalf("chunk at limit was not written completely: info=%v err=%v", info, err)
+	}
+}
+
+func TestDestinationRejectsBytesBeyondDeclaredSize(t *testing.T) {
+	m, d, dest := preparedDestination(t)
+	m.dstFile(proto.MigrationMsg{MigrationID: "mig_limits", FileID: 1,
+		File: &proto.MigrationFileInfo{Path: "declared.bin", Size: 1}})
+	raw := []byte("ab")
+	m.dstChunk(proto.MigrationMsg{MigrationID: "mig_limits", FileID: 1,
+		Data: base64.StdEncoding.EncodeToString(raw), CRC32: crc32.ChecksumIEEE(raw)})
+
+	d.mu.Lock()
+	broken := d.curBroken
+	d.mu.Unlock()
+	if !broken {
+		t.Fatal("data beyond declared file size was accepted")
+	}
+	info, err := os.Stat(filepath.Join(dest, "declared.bin"))
+	if err != nil {
+		t.Fatalf("stat declared.bin: %v", err)
+	}
+	if info.Size() != 0 {
+		t.Fatalf("over-declared chunk wrote %d bytes", info.Size())
+	}
+}
+
 func (b *relayBus) fromSource(msg any) error { return b.route(true, msg) }
 func (b *relayBus) fromDest(msg any) error   { return b.route(false, msg) }
 
@@ -245,138 +359,5 @@ func TestSafeJoin(t *testing.T) {
 		if ok != c.want {
 			t.Errorf("safeJoin(%q)=%v, want %v", c.rel, ok, c.want)
 		}
-	}
-}
-
-func preparedDestination(t *testing.T) (*Manager, *dstSession, string) {
-	t.Helper()
-	m := New(zap.NewNop(), t.TempDir())
-	m.SetSend(func(any) error { return nil })
-	dest := filepath.Join(t.TempDir(), "destination")
-	m.prepare(proto.MigrationMsg{MigrationID: "mig_limits", DestPath: dest})
-	d := m.dstSession("mig_limits")
-	if d == nil {
-		t.Fatal("destination session was not prepared")
-	}
-	t.Cleanup(d.close)
-	return m, d, dest
-}
-
-func TestDestinationRejectsNegativeFileSize(t *testing.T) {
-	m, d, dest := preparedDestination(t)
-	acks := make(chan proto.MigrationMsg, 1)
-	m.SetSend(func(msg any) error {
-		if ack, ok := msg.(proto.MigrationMsg); ok && ack.Type == proto.TypeMigrationFileAck {
-			acks <- ack
-		}
-		return nil
-	})
-
-	// Start a valid file first to verify that an invalid replacement also closes
-	// the previous descriptor instead of leaving it active.
-	m.dstFile(proto.MigrationMsg{
-		MigrationID: "mig_limits", FileID: 1,
-		File: &proto.MigrationFileInfo{Path: "previous.bin", Size: 1},
-	})
-	m.dstFile(proto.MigrationMsg{
-		MigrationID: "mig_limits", FileID: 2,
-		File: &proto.MigrationFileInfo{Path: "negative.bin", Size: -1},
-	})
-
-	d.mu.Lock()
-	broken, open, fileID := d.curBroken, d.curFile != nil, d.curFileID
-	d.mu.Unlock()
-	if !broken || open || fileID != 2 {
-		t.Fatalf("negative size state: broken=%v open=%v fileID=%d", broken, open, fileID)
-	}
-	if _, err := os.Stat(filepath.Join(dest, "negative.bin")); !os.IsNotExist(err) {
-		t.Fatalf("negative-sized file was created: %v", err)
-	}
-	m.dstFileDone(proto.MigrationMsg{MigrationID: "mig_limits", FileID: 2})
-	select {
-	case ack := <-acks:
-		if ack.OK {
-			t.Fatal("negative-sized file received a successful ACK")
-		}
-	case <-time.After(time.Second):
-		t.Fatal("negative-sized file did not receive a failure ACK")
-	}
-}
-
-func TestDestinationRejectsChunkLargerThanLimit(t *testing.T) {
-	m, d, dest := preparedDestination(t)
-	m.dstFile(proto.MigrationMsg{
-		MigrationID: "mig_limits", FileID: 1,
-		File: &proto.MigrationFileInfo{Path: "large.bin", Size: int64(maxChunkSize + 1)},
-	})
-	raw := make([]byte, maxChunkSize+1)
-	m.dstChunk(proto.MigrationMsg{
-		MigrationID: "mig_limits", FileID: 1,
-		Data: base64.StdEncoding.EncodeToString(raw), CRC32: crc32.ChecksumIEEE(raw),
-	})
-
-	d.mu.Lock()
-	broken := d.curBroken
-	d.mu.Unlock()
-	if !broken {
-		t.Fatal("oversized chunk was accepted")
-	}
-	info, err := os.Stat(filepath.Join(dest, "large.bin"))
-	if err != nil {
-		t.Fatalf("stat large.bin: %v", err)
-	}
-	if info.Size() != 0 {
-		t.Fatalf("oversized chunk wrote %d bytes", info.Size())
-	}
-}
-
-func TestDestinationAcceptsChunkAtLimit(t *testing.T) {
-	m, d, dest := preparedDestination(t)
-	m.dstFile(proto.MigrationMsg{
-		MigrationID: "mig_limits", FileID: 1,
-		File: &proto.MigrationFileInfo{Path: "at-limit.bin", Size: int64(maxChunkSize)},
-	})
-	raw := make([]byte, maxChunkSize)
-	m.dstChunk(proto.MigrationMsg{
-		MigrationID: "mig_limits", FileID: 1,
-		Data: base64.StdEncoding.EncodeToString(raw), CRC32: crc32.ChecksumIEEE(raw),
-	})
-
-	d.mu.Lock()
-	broken, written := d.curBroken, d.curWritten
-	d.mu.Unlock()
-	if broken || written != int64(maxChunkSize) {
-		t.Fatalf("chunk at limit: broken=%v written=%d", broken, written)
-	}
-	info, err := os.Stat(filepath.Join(dest, "at-limit.bin"))
-	if err != nil || info.Size() != int64(maxChunkSize) {
-		t.Fatalf("chunk at limit was not written completely: info=%v err=%v", info, err)
-	}
-}
-
-func TestDestinationRejectsBytesBeyondDeclaredSize(t *testing.T) {
-	m, d, dest := preparedDestination(t)
-	m.dstFile(proto.MigrationMsg{
-		MigrationID: "mig_limits", FileID: 1,
-		File: &proto.MigrationFileInfo{Path: "declared.bin", Size: 1},
-	})
-	raw := []byte("ab")
-	m.dstChunk(proto.MigrationMsg{
-		MigrationID: "mig_limits", FileID: 1,
-		Data: base64.StdEncoding.EncodeToString(raw), CRC32: crc32.ChecksumIEEE(raw),
-	})
-
-	d.mu.Lock()
-	broken := d.curBroken
-	d.mu.Unlock()
-	if !broken {
-		t.Fatal("data beyond declared file size was accepted")
-	}
-	info, err := os.Stat(filepath.Join(dest, "declared.bin"))
-	if err != nil {
-		t.Fatalf("stat declared.bin: %v", err)
-	}
-	if info.Size() != 0 {
-		t.Fatalf("over-declared chunk wrote %d bytes", info.Size())
 	}
 }

@@ -5,7 +5,7 @@
 #          -v auranode-data:/var/lib/auranode \
 #          auranode-agent
 
-FROM golang:1.26.6-alpine AS build
+FROM golang:1.27.4-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -17,7 +17,7 @@ RUN CGO_ENABLED=0 go build \
       -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
       -o /out/auranode-agent ./cmd/auranode-agent
 
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM gcr.io/distroless/static-debian13:nonroot
 COPY --from=build /out/auranode-agent /usr/local/bin/auranode-agent
 ENV AURANODE_DB_PATH=/var/lib/auranode/buffer.db
 VOLUME ["/var/lib/auranode"]

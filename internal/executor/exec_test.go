@@ -15,10 +15,10 @@ func TestRunBoundsOutputWhileCommandRuns(t *testing.T) {
 		t.Fatalf("unexpected exit status: %d (%s)", res.ExitStatus, res.Stderr)
 	}
 	if !strings.HasSuffix(res.Stdout, truncatedMarker) {
-		t.Fatalf("stdout was not marked as truncated")
+		t.Fatal("stdout was not marked as truncated")
 	}
 	if !strings.HasSuffix(res.Stderr, truncatedMarker) {
-		t.Fatalf("stderr was not marked as truncated")
+		t.Fatal("stderr was not marked as truncated")
 	}
 	if got, max := len(res.Stdout), maxStdoutBytes+len(truncatedMarker); got > max {
 		t.Fatalf("stdout retained %d bytes, max %d", got, max)
